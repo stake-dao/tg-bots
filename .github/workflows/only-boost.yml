@@ -1,0 +1,71 @@
+name: Bot Only Boost
+
+on:
+  schedule:
+    - cron: "0/20 * * * *" # Every 20 minutes
+  workflow_dispatch: # Allows the workflow to be triggered manually
+
+env:
+  TARGET_DEVOPS_DIR: target-devops
+  DEVOPS_DIR: devops
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the tg-bots repo
+        uses: actions/checkout@v4
+        with:
+          repository: stake-dao/automation-jobs
+          token: ${{ secrets.GIT_ACCESS_TOKEN }}
+          path: ${{ env.DEVOPS_DIR }}
+          ref: main
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10.13"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: pip install -r ${{ env.DEVOPS_DIR }}/requirements.txt
+        shell: bash
+
+      - name: Run the script
+        run: |
+          cd ${{ env.DEVOPS_DIR }}
+          python script/tg-bots/onlyboost/onlyboost.py
+        shell: bash
+        env:
+          PYTHONPATH: script/
+
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          repository: stake-dao/tg-bots
+          token: ${{ secrets.GIT_ACCESS_TOKEN }}
+          path: ${{ env.TARGET_DEVOPS_DIR }}
+        if: always()
+          
+      - name: Copy config to target repo
+        run: |
+          cp -R "${{ env.DEVOPS_DIR }}/json/only-boost" "${GITHUB_WORKSPACE}/${{ env.TARGET_DEVOPS_DIR }}/data/only-boost"
+
+      - name: Commit and push changes to repo
+        run: |
+          cd "${GITHUB_WORKSPACE}/${{ env.TARGET_DEVOPS_DIR }}"
+          git config user.email "actions@github.com"
+          git config user.name "Stake DAO Automation"
+          git add .
+          git commit -m "Only boost"
+          git push
+        shell: bash
+        if: always()
+      
