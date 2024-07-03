@@ -2,7 +2,7 @@ name: Bot Votemarket
 
 on:
   schedule:
-    - cron: "0/20 * * * *" # Every 20 minutes
+    - cron: "0/11 * * * *" # Every 20 minutes
   workflow_dispatch: # Allows the workflow to be triggered manually
 
 env:
