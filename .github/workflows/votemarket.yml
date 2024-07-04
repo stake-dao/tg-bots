@@ -65,6 +65,8 @@ jobs:
           git config user.name "Stake DAO Automation"
           git add .
           git commit -m "Votemarket"
+          git pull
+          git merge --strategy=ours origin/main
           git push
         shell: bash
         if: always()
