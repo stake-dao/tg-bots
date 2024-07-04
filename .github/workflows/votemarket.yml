@@ -63,6 +63,7 @@ jobs:
           cd "${GITHUB_WORKSPACE}/${{ env.TARGET_DEVOPS_DIR }}"
           git config user.email "actions@github.com"
           git config user.name "Stake DAO Automation"
+          git config pull.rebase false
           git add .
           git commit -m "Votemarket"
           git pull
