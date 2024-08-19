@@ -8,6 +8,7 @@ on:
 env:
   TARGET_DEVOPS_DIR: target-devops
   DEVOPS_DIR: devops
+  WEB3_ALCHEMY_API_KEY: ${{ secrets.WEB3_ALCHEMY_API_KEY }}
 
 jobs:
   build:
