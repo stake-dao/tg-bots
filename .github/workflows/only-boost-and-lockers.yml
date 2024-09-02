@@ -1,4 +1,4 @@
-name: Bot Only Boost
+name: Bot Only Boost and Lockers
 
 on:
   schedule:
@@ -39,10 +39,18 @@ jobs:
         run: pip install -r ${{ env.DEVOPS_DIR }}/requirements.txt
         shell: bash
 
-      - name: Run the script
+      - name: Run the onlyboost script
         run: |
           cd ${{ env.DEVOPS_DIR }}
           python script/tg-bots/onlyboost/onlyboost.py
+        shell: bash
+        env:
+          PYTHONPATH: script/
+
+      - name: Run the lockers script
+        run: |
+          cd ${{ env.DEVOPS_DIR }}
+          python script/tg-bots/curve-pools/main.py
         shell: bash
         env:
           PYTHONPATH: script/
