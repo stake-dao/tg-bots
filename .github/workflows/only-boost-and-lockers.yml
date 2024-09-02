@@ -63,9 +63,13 @@ jobs:
           path: ${{ env.TARGET_DEVOPS_DIR }}
         if: always()
           
-      - name: Copy config to target repo
+      - name: Copy onlyboost config to target repo
         run: |
           cp -R "${{ env.DEVOPS_DIR }}/json/only-boost" "${GITHUB_WORKSPACE}/${{ env.TARGET_DEVOPS_DIR }}/data"
+
+      - name: Copy lockers config to target repo
+        run: |
+          cp -R "${{ env.DEVOPS_DIR }}/json/tg-bots" "${GITHUB_WORKSPACE}/${{ env.TARGET_DEVOPS_DIR }}/data"
 
       - name: Commit and push changes to repo
         run: |
