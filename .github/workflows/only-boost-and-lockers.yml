@@ -1,4 +1,4 @@
-name: Bot Only Boost / Lockers
+name: Bot Only Boost / Lockers / veSDT
 
 on:
   schedule:
@@ -53,6 +53,14 @@ jobs:
         run: |
           cd ${{ env.DEVOPS_DIR }}
           python script/tg-bots/curve-pools/main.py
+        shell: bash
+        env:
+          PYTHONPATH: script/
+
+      - name: Run the veSDT script
+        run: |
+          cd ${{ env.DEVOPS_DIR }}
+          python script/tg-bots/vesdt/main.py
         shell: bash
         env:
           PYTHONPATH: script/
