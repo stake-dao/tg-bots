@@ -1,4 +1,4 @@
-name: Bot Only Boost / Lockers / veSDT
+name: Bot Only Boost / Lockers / veSDT / Llamalend asdcrv
 
 on:
   schedule:
@@ -11,6 +11,7 @@ env:
   WEB3_ALCHEMY_API_KEY: ${{ secrets.WEB3_ALCHEMY_API_KEY }}
   FRAXSCAN_API_KEY: ${{ secrets.FRAXSCAN_API_KEY }}
   ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+  EXPLORER_KEY: ${{ secrets.EXPLORER_KEY }}
 
 jobs:
   build:
@@ -61,6 +62,13 @@ jobs:
         run: |
           cd ${{ env.DEVOPS_DIR }}
           python script/tg-bots/vesdt/main.py
+        shell: bash
+        env:
+          PYTHONPATH: script/
+      - name: Run the Llamalend asdcrv script
+        run: |
+          cd ${{ env.DEVOPS_DIR }}
+          python script/tg-bots/asdcrv/main.py
         shell: bash
         env:
           PYTHONPATH: script/
