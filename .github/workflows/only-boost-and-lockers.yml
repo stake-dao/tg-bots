@@ -9,6 +9,8 @@ env:
   TARGET_DEVOPS_DIR: target-devops
   DEVOPS_DIR: devops
   WEB3_ALCHEMY_API_KEY: ${{ secrets.WEB3_ALCHEMY_API_KEY }}
+  FRAXTAL_RPC: ${{ secrets.FRAXTAL_RPC }}
+  BSC_RPC: ${{ secrets.BSC_RPC }}
   FRAXSCAN_API_KEY: ${{ secrets.FRAXSCAN_API_KEY }}
   ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
   EXPLORER_KEY: ${{ secrets.EXPLORER_KEY }}
