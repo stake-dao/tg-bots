@@ -47,7 +47,7 @@ jobs:
       - name: Run the script
         run: |
           cd ${{ env.DEVOPS_DIR }}
-          python script/tg-bots/harvest/harvest-strats.py
+          python script/bots/harvest/harvest-strats.py
         shell: bash
         env:
           PYTHONPATH: script/
