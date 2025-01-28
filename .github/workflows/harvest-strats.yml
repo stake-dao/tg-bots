@@ -1,0 +1,53 @@
+name: Bot detect harvest strategies
+
+on:
+  schedule:
+    - cron: "0/10 * * * *" # Every 10 minutes
+  workflow_dispatch: # Allows the workflow to be triggered manually
+
+env:
+  TARGET_DEVOPS_DIR: target-devops
+  DEVOPS_DIR: devops
+  WEB3_ALCHEMY_API_KEY: ${{ secrets.WEB3_ALCHEMY_API_KEY }}
+  FRAXTAL_RPC: ${{ secrets.FRAXTAL_RPC }}
+  BSC_RPC: ${{ secrets.BSC_RPC }}
+  FRAXSCAN_API_KEY: ${{ secrets.FRAXSCAN_API_KEY }}
+  ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+  EXPLORER_KEY: ${{ secrets.EXPLORER_KEY }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the tg-bots repo
+        uses: actions/checkout@v4
+        with:
+          repository: stake-dao/automation-jobs
+          token: ${{ secrets.GIT_ACCESS_TOKEN }}
+          path: ${{ env.DEVOPS_DIR }}
+          ref: main
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10.13"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: pip install -r ${{ env.DEVOPS_DIR }}/requirements.txt
+        shell: bash
+
+      - name: Run the script
+        run: |
+          cd ${{ env.DEVOPS_DIR }}
+          python script/bots/harvest/harvest-strats.py
+        shell: bash
+        env:
+          PYTHONPATH: script/
