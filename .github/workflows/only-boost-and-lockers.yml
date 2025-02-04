@@ -97,6 +97,7 @@ jobs:
           git config user.email "actions@github.com"
           git config user.name "Stake DAO Automation"
           git config pull.rebase false
+          git pull
           git add .
           git commit -m "Only boost"
           git pull
