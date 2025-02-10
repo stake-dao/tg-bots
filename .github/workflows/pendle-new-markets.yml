@@ -47,7 +47,7 @@ jobs:
       - name: Run the Pendle script
         run: |
           cd ${{ env.DEVOPS_DIR }}
-          python script/tg-bots/pendle/new-markets.py
+          python script/bots/pendle/new-markets.py
         shell: bash
         env:
           PYTHONPATH: script/
