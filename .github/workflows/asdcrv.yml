@@ -51,31 +51,3 @@ jobs:
         shell: bash
         env:
           PYTHONPATH: script/
-
-      - name: Checkout target repository
-        uses: actions/checkout@v4
-        with:
-          repository: stake-dao/tg-bots
-          token: ${{ secrets.GIT_ACCESS_TOKEN }}
-          path: ${{ env.TARGET_DEVOPS_DIR }}
-        if: always()
-          
-      - name: Copy lockers config to target repo
-        run: |
-          cp -R "${{ env.DEVOPS_DIR }}/json/tg-bots" "${GITHUB_WORKSPACE}/${{ env.TARGET_DEVOPS_DIR }}/data"
-
-      - name: Commit and push changes to repo
-        run: |
-          cd "${GITHUB_WORKSPACE}/${{ env.TARGET_DEVOPS_DIR }}"
-          git config user.email "actions@github.com"
-          git config user.name "Stake DAO Automation"
-          git config pull.rebase false
-          git pull
-          git add .
-          git commit -m "Only boost"
-          git pull
-          git merge --strategy=ours origin/main
-          git push
-        shell: bash
-        if: always()
-      
