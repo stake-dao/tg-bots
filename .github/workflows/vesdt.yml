@@ -1,8 +1,8 @@
-name: Bot new Pendle markets
+name: Bot veSDT
 
 on:
   schedule:
-    - cron: "0 0 * * *" # Every day
+    - cron: "0/10 * * * *" # Every 10 minutes
   workflow_dispatch: # Allows the workflow to be triggered manually
 
 env:
@@ -44,10 +44,10 @@ jobs:
         run: pip install -r ${{ env.DEVOPS_DIR }}/requirements.txt
         shell: bash
 
-      - name: Run the Pendle script
+      - name: Run the veSDT script
         run: |
           cd ${{ env.DEVOPS_DIR }}
-          python script/bots/pendle/new-markets.py
+          python script/tg-bots/vesdt/main.py
         shell: bash
         env:
           PYTHONPATH: script/

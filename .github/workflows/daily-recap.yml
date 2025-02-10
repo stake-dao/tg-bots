@@ -44,7 +44,7 @@ jobs:
       - name: Run the daily recap bot
         run: |
           cd ${{ env.DEVOPS_DIR }}
-          python script/tg-bots/daily-lockers/main.py
+          python script/bots/daily/lockers/main.py
         shell: bash
         env:
           PYTHONPATH: script/
