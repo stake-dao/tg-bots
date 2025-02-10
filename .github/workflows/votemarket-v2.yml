@@ -41,37 +41,10 @@ jobs:
         run: pip install -r ${{ env.DEVOPS_DIR }}/requirements.txt
         shell: bash
 
-      - name: Run the vm v1 script
+      - name: Run VM V2 script
         run: |
           cd ${{ env.DEVOPS_DIR }}
-          python script/tg-bots/votemarket/votemarket.py
+          python script/bots/votemarket/v2/votemarket.py
         shell: bash
         env:
           PYTHONPATH: script/
-
-      - name: Checkout target repository
-        uses: actions/checkout@v4
-        with:
-          repository: stake-dao/tg-bots
-          token: ${{ secrets.GIT_ACCESS_TOKEN }}
-          path: ${{ env.TARGET_DEVOPS_DIR }}
-        if: always()
-          
-      - name: Copy config to target repo
-        run: |
-          cp -R "${{ env.DEVOPS_DIR }}/json/votemarket" "${GITHUB_WORKSPACE}/${{ env.TARGET_DEVOPS_DIR }}/data"
-
-      - name: Commit and push changes to repo
-        run: |
-          cd "${GITHUB_WORKSPACE}/${{ env.TARGET_DEVOPS_DIR }}"
-          git config user.email "actions@github.com"
-          git config user.name "Stake DAO Automation"
-          git config pull.rebase false
-          git add .
-          git commit -m "Votemarket"
-          git pull
-          git merge --strategy=ours origin/main
-          git push
-        shell: bash
-        if: always()
-      

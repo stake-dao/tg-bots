@@ -1,8 +1,8 @@
-name: Bot Votemarket
+name: Bot Lockers
 
 on:
   schedule:
-    - cron: "0/11 * * * *" # Every 11 minutes
+    - cron: "0/10 * * * *" # Every 10 minutes
   workflow_dispatch: # Allows the workflow to be triggered manually
 
 env:
@@ -11,6 +11,9 @@ env:
   WEB3_ALCHEMY_API_KEY: ${{ secrets.WEB3_ALCHEMY_API_KEY }}
   FRAXTAL_RPC: ${{ secrets.FRAXTAL_RPC }}
   BSC_RPC: ${{ secrets.BSC_RPC }}
+  FRAXSCAN_API_KEY: ${{ secrets.FRAXSCAN_API_KEY }}
+  ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+  EXPLORER_KEY: ${{ secrets.EXPLORER_KEY }}
 
 jobs:
   build:
@@ -41,37 +44,10 @@ jobs:
         run: pip install -r ${{ env.DEVOPS_DIR }}/requirements.txt
         shell: bash
 
-      - name: Run the vm v1 script
+      - name: Run the lockers script
         run: |
           cd ${{ env.DEVOPS_DIR }}
-          python script/tg-bots/votemarket/votemarket.py
+          python script/bots/curve/pools/main.py
         shell: bash
         env:
           PYTHONPATH: script/
-
-      - name: Checkout target repository
-        uses: actions/checkout@v4
-        with:
-          repository: stake-dao/tg-bots
-          token: ${{ secrets.GIT_ACCESS_TOKEN }}
-          path: ${{ env.TARGET_DEVOPS_DIR }}
-        if: always()
-          
-      - name: Copy config to target repo
-        run: |
-          cp -R "${{ env.DEVOPS_DIR }}/json/votemarket" "${GITHUB_WORKSPACE}/${{ env.TARGET_DEVOPS_DIR }}/data"
-
-      - name: Commit and push changes to repo
-        run: |
-          cd "${GITHUB_WORKSPACE}/${{ env.TARGET_DEVOPS_DIR }}"
-          git config user.email "actions@github.com"
-          git config user.name "Stake DAO Automation"
-          git config pull.rebase false
-          git add .
-          git commit -m "Votemarket"
-          git pull
-          git merge --strategy=ours origin/main
-          git push
-        shell: bash
-        if: always()
-      

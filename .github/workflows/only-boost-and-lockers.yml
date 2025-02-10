@@ -1,4 +1,4 @@
-name: Bot Only Boost / Lockers / veSDT / Llamalend asdcrv
+name: Bot veSDT / Llamalend asdcrv
 
 on:
   schedule:
@@ -44,22 +44,6 @@ jobs:
         run: pip install -r ${{ env.DEVOPS_DIR }}/requirements.txt
         shell: bash
 
-      - name: Run the onlyboost script
-        run: |
-          cd ${{ env.DEVOPS_DIR }}
-          python script/tg-bots/onlyboost/onlyboost.py
-        shell: bash
-        env:
-          PYTHONPATH: script/
-
-      - name: Run the lockers script
-        run: |
-          cd ${{ env.DEVOPS_DIR }}
-          python script/tg-bots/curve-pools/main.py
-        shell: bash
-        env:
-          PYTHONPATH: script/
-
       - name: Run the veSDT script
         run: |
           cd ${{ env.DEVOPS_DIR }}
@@ -83,10 +67,6 @@ jobs:
           path: ${{ env.TARGET_DEVOPS_DIR }}
         if: always()
           
-      - name: Copy onlyboost config to target repo
-        run: |
-          cp -R "${{ env.DEVOPS_DIR }}/json/only-boost" "${GITHUB_WORKSPACE}/${{ env.TARGET_DEVOPS_DIR }}/data"
-
       - name: Copy lockers config to target repo
         run: |
           cp -R "${{ env.DEVOPS_DIR }}/json/tg-bots" "${GITHUB_WORKSPACE}/${{ env.TARGET_DEVOPS_DIR }}/data"
