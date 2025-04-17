@@ -2,7 +2,7 @@ name: Bot new Pendle markets
 
 on:
   schedule:
-    - cron: "0 0 * * *" # Every day
+    - cron: "0 * * * *" # Every hours
   workflow_dispatch: # Allows the workflow to be triggered manually
 
 env:
