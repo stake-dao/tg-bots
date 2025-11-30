@@ -41,11 +41,21 @@ jobs:
         run: pip install -r ${{ env.DEVOPS_DIR }}/requirements.txt
         shell: bash
 
-      - name: Run the daily recap bot
+      - name: Run the LL daily recap bot
         run: |
           cd ${{ env.DEVOPS_DIR }}
           python script/bots/daily/lockers/main.py
         shell: bash
         env:
           PYTHONPATH: script/
+
+      - name: Run the Strategies daily recap bot
+        run: |
+          cd ${{ env.DEVOPS_DIR }}
+          python script/tg-bots/staking-v2-daily/main.py
+        shell: bash
+        env:
+          PYTHONPATH: script/
+
+
       
