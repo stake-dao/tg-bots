@@ -48,6 +48,7 @@ jobs:
         shell: bash
         env:
           PYTHONPATH: script/
+          PROD: "True"
 
       - name: Checkout target repository
         uses: actions/checkout@v4

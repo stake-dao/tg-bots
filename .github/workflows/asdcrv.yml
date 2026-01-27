@@ -51,3 +51,4 @@ jobs:
         shell: bash
         env:
           PYTHONPATH: script/
+          PROD: "True"

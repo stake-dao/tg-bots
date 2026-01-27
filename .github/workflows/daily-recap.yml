@@ -48,6 +48,7 @@ jobs:
         shell: bash
         env:
           PYTHONPATH: script/
+          PROD: "True"
 
       - name: Run the Strategies daily recap bot
         run: |
@@ -56,6 +57,7 @@ jobs:
         shell: bash
         env:
           PYTHONPATH: script/
+          PROD: "True"
 
 
       
