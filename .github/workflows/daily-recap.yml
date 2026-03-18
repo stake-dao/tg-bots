@@ -59,5 +59,11 @@ jobs:
           PYTHONPATH: script/
           PROD: "True"
 
-
-      
+      - name: Run the Morpho daily recap bot
+        run: |
+          cd ${{ env.DEVOPS_DIR }}
+          python script/tg-bots/morpho-daily/main.py
+        shell: bash
+        env:
+          PYTHONPATH: script/
+          PROD: "True"
