@@ -22,7 +22,7 @@ jobs:
           repository: stake-dao/automation-jobs
           token: ${{ secrets.GIT_ACCESS_TOKEN }}
           path: ${{ env.DEVOPS_DIR }}
-          ref: feature/bots-infrastructure-cleanup
+          ref: main
 
       - name: Setup Python
         uses: actions/setup-python@v5
