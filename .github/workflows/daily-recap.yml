@@ -22,7 +22,7 @@ jobs:
           repository: stake-dao/automation-jobs
           token: ${{ secrets.GIT_ACCESS_TOKEN }}
           path: ${{ env.DEVOPS_DIR }}
-          ref: main
+          ref: feature/bots-infrastructure-cleanup
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -53,7 +53,7 @@ jobs:
       - name: Run the Strategies daily recap bot
         run: |
           cd ${{ env.DEVOPS_DIR }}
-          python script/tg-bots/staking-v2-daily/main.py
+          python script/bots/staking_v2_daily/main.py
         shell: bash
         env:
           PYTHONPATH: script/
@@ -62,7 +62,7 @@ jobs:
       - name: Run the Morpho daily recap bot
         run: |
           cd ${{ env.DEVOPS_DIR }}
-          python script/tg-bots/morpho-daily/main.py
+          python script/bots/morpho_daily/main.py
         shell: bash
         env:
           PYTHONPATH: script/
