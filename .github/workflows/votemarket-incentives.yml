@@ -1,9 +1,13 @@
 name: Bot Votemarket Direct Incentives
 
 on:
-  schedule:
-    - cron: "0/10 * * * *" # Every 10 minutes
-  workflow_dispatch: # Allows the workflow to be triggered manually
+  workflow_dispatch:
+    inputs:
+      dispatch_id:
+        type: string
+        description: "Unique ID for Temporal tracking"
+        required: false
+        default: ""
 
 env:
   DEVOPS_DIR: devops
@@ -14,6 +18,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: "dispatch_id:${{ github.event.inputs.dispatch_id || 'manual' }}"
+        if: always()
+        run: echo "Temporal tracking"
+
       - name: Checkout the automation-jobs repo
         uses: actions/checkout@v4
         with:

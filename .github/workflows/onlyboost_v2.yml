@@ -1,10 +1,13 @@
 name: Bot Only Boost V2
 
 on:
-  schedule:
-    - cron: "0/10 * * * *" # Every 10 minutes
-  workflow_dispatch: # Allows the workflow to be triggered manually
-  # Re-enable cron schedule
+  workflow_dispatch:
+    inputs:
+      dispatch_id:
+        type: string
+        description: "Unique ID for Temporal tracking"
+        required: false
+        default: ""
 
 env:
   TARGET_DEVOPS_DIR: target-devops
@@ -21,6 +24,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: "dispatch_id:${{ github.event.inputs.dispatch_id || 'manual' }}"
+        if: always()
+        run: echo "Temporal tracking"
+
       - name: Checkout the tg-bots repo
         uses: actions/checkout@v4
         with:
