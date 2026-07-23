@@ -9,6 +9,10 @@ on:
         required: false
         default: ""
 
+concurrency:
+  group: bot-votemarket-incentives
+  cancel-in-progress: false
+
 env:
   DEVOPS_DIR: devops
   WEB3_ALCHEMY_API_KEY: ${{ secrets.WEB3_ALCHEMY_API_KEY }}

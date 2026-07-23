@@ -9,6 +9,10 @@ on:
         required: false
         default: ""
 
+concurrency:
+  group: bot-votemarket-v2
+  cancel-in-progress: false
+
 env:
   TARGET_DEVOPS_DIR: target-devops
   DEVOPS_DIR: devops
