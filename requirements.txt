@@ -1,0 +1,7 @@
+httpx==0.28.1
+python-dotenv==1.0.1
+redis==5.2.1
+requests==2.32.3
+rich==13.9.0
+w3multicall==0.3.1
+web3==7.14.0

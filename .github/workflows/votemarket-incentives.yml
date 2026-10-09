@@ -13,26 +13,33 @@ concurrency:
   group: bot-votemarket-incentives
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  actions: read
+
 env:
-  DEVOPS_DIR: devops
+  GITHUB_TOKEN: ${{ github.token }}
+  ROUTEMESH_API_KEY: ${{ secrets.ROUTEMESH_API_KEY }}
+  BOT_VOTEMARKET_API_KEY: ${{ secrets.BOT_VOTEMARKET_API_KEY }}
+  REDIS_HOST: ${{ secrets.REDIS_HOST }}
+  REDIS_PORT: ${{ secrets.REDIS_PORT }}
+  REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
   WEB3_ALCHEMY_API_KEY: ${{ secrets.WEB3_ALCHEMY_API_KEY }}
   EXPLORER_KEY: ${{ secrets.EXPLORER_KEY }}
 
 jobs:
   build:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - name: "dispatch_id:${{ github.event.inputs.dispatch_id || 'manual' }}"
         if: always()
         run: echo "Temporal tracking"
 
-      - name: Checkout the automation-jobs repo
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          repository: stake-dao/automation-jobs
-          token: ${{ secrets.GIT_ACCESS_TOKEN }}
-          path: ${{ env.DEVOPS_DIR }}
-          ref: main
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -48,12 +55,21 @@ jobs:
             ${{ runner.os }}-pip-
 
       - name: Install dependencies
-        run: pip install -r ${{ env.DEVOPS_DIR }}/requirements.txt
+        run: pip install -r requirements.txt
+        shell: bash
+
+      - name: Check required secrets
+        run: |
+          for key in BOT_VOTEMARKET_API_KEY REDIS_HOST REDIS_PORT REDIS_PASSWORD; do
+            if [[ -z "${!key}" ]]; then
+              echo "::error::Missing $key"
+              exit 1
+            fi
+          done
         shell: bash
 
       - name: Run the Votemarket Direct Incentives bot
         run: |
-          cd ${{ env.DEVOPS_DIR }}
           python script/bots/votemarket_incentives/main.py
         shell: bash
         env:
