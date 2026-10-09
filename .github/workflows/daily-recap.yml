@@ -24,6 +24,8 @@ env:
   ROUTEMESH_API_KEY: ${{ secrets.ROUTEMESH_API_KEY }}
   BOT_API_KEY: ${{ secrets.BOT_API_KEY }}
   WEB3_ALCHEMY_API_KEY: ${{ secrets.WEB3_ALCHEMY_API_KEY }}
+  EXPLORER_KEY: ${{ secrets.EXPLORER_KEY }}
+  ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
 
 jobs:
   build:

@@ -203,6 +203,7 @@ class GlobalConstants:
             "https://1rpc.io/op",
         ],
         56: [  # BSC
+            "https://bsc-rpc.publicnode.com",
             "https://bsc-dataseed.bnbchain.org",
             "https://bsc.drpc.org",
             "https://binance.llamarpc.com",

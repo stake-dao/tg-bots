@@ -80,9 +80,15 @@ class FallbackHTTPProvider(HTTPProvider):
 
     def make_request(self, method: Any, params: Any) -> Any:
         last_error: Optional[BaseException] = None
+        last_rpc_error = None
         for _ in range(len(self._endpoints)):
             try:
-                return super().make_request(method, params)
+                response = super().make_request(method, params)
+                if method == "eth_getLogs" and response.get("error", {}).get("code") == -32005:
+                    last_rpc_error = response
+                    self._advance()
+                    continue
+                return response
             except (
                 requests.exceptions.HTTPError,
                 requests.exceptions.ConnectionError,
@@ -90,6 +96,8 @@ class FallbackHTTPProvider(HTTPProvider):
             ) as error:
                 last_error = error
                 self._advance()
+        if last_rpc_error is not None:
+            return last_rpc_error
         assert last_error is not None
         raise last_error
 

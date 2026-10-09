@@ -381,3 +381,51 @@ def test_onlyboost_native_scans_preserve_redis(isolated_bot, monkeypatch, caplog
         onlyboost.main()
         assert records == {"1": "1000", "42161": "902", "146": "972"}
     assert state["payloads"] == []
+
+
+
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_native_rpc_log_limit_failover(monkeypatch, unavailable):
+    import json
+    from web3 import Web3
+    from web3.exceptions import Web3RPCError
+    from shared.services.web3_service import build_web3
+    from bots.curve.pools import main as pools
+
+    urls = ["https://fixture.invalid/limited", "https://fixture.invalid/healthy"]
+    monkeypatch.setattr(GlobalConstants, "rpc_endpoints", lambda chain: urls)
+    calls = []
+    queries = []
+
+    def send(session, request, **kwargs):
+        payload = json.loads(request.body)
+        assert payload["method"] == "eth_getLogs"
+        calls.append(request.url)
+        queries.append(payload["params"][0])
+        data = {"jsonrpc": "2.0", "id": payload["id"]}
+        if request.url == urls[0] or unavailable:
+            data["error"] = {"code": -32005, "message": "limit exceeded"}
+        else:
+            data["result"] = []
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps(data).encode()
+        response._content_consumed = True
+        return response
+
+    monkeypatch.setattr(requests.sessions.Session, "send", send)
+    w3 = build_web3(1)
+    w3.provider.exception_retry_configuration = None
+    contract = w3.eth.contract(address=Web3.to_checksum_address("0x00000000000000000000000000000000000000A1"), abi=pools.curveStableSwapABI)
+    if unavailable:
+        with pytest.raises(Web3RPCError):
+            contract.events.TokenExchange().get_logs(from_block=10, to_block=20)
+        assert calls == urls
+    else:
+        assert list(contract.events.TokenExchange().get_logs(from_block=10, to_block=20)) == []
+        assert calls == urls
+        contract.events.TokenExchange().get_logs(from_block=10, to_block=20)
+        assert calls == urls + [urls[1]]
+    assert all(query == queries[0] for query in queries)
+    assert queries[0]["fromBlock"] == "0xa"
+    assert queries[0]["toBlock"] == "0x14"
