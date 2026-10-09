@@ -252,7 +252,8 @@ def test_native_web3_keeps_rpc_fallback_and_poa(monkeypatch):
 
 
 
-def test_votemarket_multichain_recovers_logs_once_per_run(isolated_bot, monkeypatch, caplog):
+@pytest.mark.parametrize("rpc_fails", [False, True])
+def test_votemarket_multichain_recovers_logs_once_per_run(isolated_bot, monkeypatch, caplog, rpc_fails):
     import asyncio
     from bots.votemarket.v2 import votemarket
 
@@ -265,6 +266,8 @@ def test_votemarket_multichain_recovers_logs_once_per_run(isolated_bot, monkeypa
     class Provider(BaseProvider):
         def make_request(self, method, params):
             rpc_calls.append((method, params))
+            if rpc_fails and method == "eth_getLogs":
+                raise ConnectionError("fixture RPC unavailable")
             result = {"eth_getBlockByNumber": {"number": "0x3e8"}, "eth_chainId": "0x1", "eth_getLogs": []}[method]
             return {"jsonrpc": "2.0", "id": 1, "result": result}
 
@@ -282,6 +285,11 @@ def test_votemarket_multichain_recovers_logs_once_per_run(isolated_bot, monkeypa
     multicall.return_value.call.return_value = []
     monkeypatch.setattr(votemarket, "W3Multicall", multicall)
     monkeypatch.setattr(votemarket.time, "sleep", lambda seconds: None)
+    if rpc_fails:
+        with pytest.raises(ConnectionError):
+            asyncio.run(votemarket.main())
+        assert state["payloads"] == []
+        return
     asyncio.run(votemarket.main())
     assert sum(url.endswith("/logs") for url in state["reads"]) == 1
     assert caplog.text.count("Chain 1 / last block 999") == 1

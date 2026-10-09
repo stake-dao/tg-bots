@@ -617,36 +617,31 @@ async def job():
                 continue
 
             for platform_address in platform_addresses:
-                try:
-                    await get_campaigns_created(
-                        web3,
-                        chain_id,
-                        platform_address,
-                        block_min,
-                        block_max,
-                        names,
-                        gauges_endpoint,
-                    )
+                await get_campaigns_created(
+                    web3,
+                    chain_id,
+                    platform_address,
+                    block_min,
+                    block_max,
+                    names,
+                    gauges_endpoint,
+                )
 
-                    # Rate limit
-                    time.sleep(5)
+                # Rate limit
+                time.sleep(5)
 
-                    await get_campaigns_increased(
-                        web3,
-                        chain_id,
-                        platform_address,
-                        block_min,
-                        block_max,
-                        names,
-                        gauges_endpoint,
-                    )
+                await get_campaigns_increased(
+                    web3,
+                    chain_id,
+                    platform_address,
+                    block_min,
+                    block_max,
+                    names,
+                    gauges_endpoint,
+                )
 
-                    # Rate limit
-                    time.sleep(5)
-                except Exception as e:
-                    # If RPC error : "429 Client Error: Too Many Requests"
-                    print(e)
-                    time.sleep(5)
+                # Rate limit
+                time.sleep(5)
 
 
 async def main():

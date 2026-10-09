@@ -18,6 +18,16 @@ Each scheduled job requires its own repository variable to equal the exact strin
 | `tg-bot-votemarket-incentives` | `votemarket-incentives.yml` | `BOT_CRON_VOTEMARKET_INCENTIVES` |
 | `tg-bot-votemarket-v2` | `votemarket-v2.yml` | `BOT_CRON_VOTEMARKET_V2` |
 
+## Cutover status — October 9
+
+Orchestrator #129 deployed successfully at commit `f33c80b5d55807783e5c9116931782c8e1adb446`; the live Temporal UI lists 41 schedules and zero `schedule:pipeline:tg-bot-*` schedules. All nine old schedules were paused and bot pipelines drained before extraction/canaries. Guard promotion #128 remains open with only four non-bot pipeline files.
+
+Nine production canaries ran on extraction commit `c5bb2a38a03409c29efeea6da6fc5a9e3a8de55b`. Lockers run `37958292558` failed on obsolete native event-filter keywords. VoteMarket run `37958322626` completed despite 18 identical scan errors and emitted unusable advanced checkpoints. OnlyBoost run `37958305666` skipped Ethereum, Arbitrum and Sonic on unprefixed event topics; existing Redis checkpoints for failed chains remain the recovery source. Daily recap run `37958296090` completed all three scripts but reported `NOTOK` while fetching vlSDT delegatees.
+
+PR #26 fixes those Web3 compatibility errors, makes VoteMarket scan failures fail the job, and adds inert crons. Local validation passes 83 isolated tests. Main protection is an active organization ruleset with required review and no bypass actors; the current account has repository admin access but cannot bypass that ruleset as configured.
+
+Activation is held: merge the fixes through the approved protection process; prevent invalid VoteMarket run `37958322626` from being selected as a checkpoint; rerun Lockers, VoteMarket and OnlyBoost with valid checkpoint continuity; resolve the recap delegatee warning. Do not enable cron variables or replay from the invalid VoteMarket markers. Deleting that invalid Actions run is destructive and requires explicit authorization; preserve sanitized evidence first. The final valid VoteMarket run is `37956890176`: Arbitrum `513247130`, Base `52386346`, Optimism `157981640` (next blocks).
+
 ## Timing changes
 
 Seven interval bots retain five-minute UTC wall-clock slots. Daily recap retains 11:00 UTC. VoteMarket V2 changes from a continuous 11-minute interval to `*/10` (six wall-clock slots/hour, about 10% more runs). `*/11` would produce minute slots 0, 11, 22, 33, 44, 55 and a five-minute gap at the hour boundary; it does not preserve an 11-minute interval.
