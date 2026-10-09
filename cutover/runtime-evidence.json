@@ -1,0 +1,177 @@
+[
+  {
+    "workflow": "asdcrv.yml",
+    "name": "Bot Llamalend asdcrv",
+    "run_id": 37946534929,
+    "created_at": "2026-10-09T14:45:13Z",
+    "actor": "stake-dao-maestro[bot]",
+    "conclusion": "success",
+    "checkpoint_markers": [
+      {
+        "chain_id": 42161,
+        "next_from_block": 513227969
+      }
+    ],
+    "dispatch_pipeline": [
+      "tg-bot-asdcrv"
+    ]
+  },
+  {
+    "workflow": "curve-pools.yml",
+    "name": "Bot Lockers",
+    "run_id": 37946538998,
+    "created_at": "2026-10-09T14:45:14Z",
+    "actor": "stake-dao-maestro[bot]",
+    "conclusion": "success",
+    "checkpoint_markers": [
+      {
+        "chain_id": 1,
+        "next_from_block": 26155538
+      },
+      {
+        "chain_id": 56,
+        "next_from_block": 126654215
+      }
+    ],
+    "dispatch_pipeline": [
+      "tg-bot-curve-pools"
+    ]
+  },
+  {
+    "workflow": "morpho.yml",
+    "name": "Bot Morpho Stake DAO",
+    "run_id": 37946537212,
+    "created_at": "2026-10-09T14:45:14Z",
+    "actor": "stake-dao-maestro[bot]",
+    "conclusion": "success",
+    "checkpoint_markers": [
+      {
+        "chain_id": 1,
+        "next_from_block": 26155538
+      }
+    ],
+    "dispatch_pipeline": [
+      "tg-bot-morpho"
+    ]
+  },
+  {
+    "workflow": "vlcvx-delegation.yml",
+    "name": "Bot vlCVX delegation",
+    "run_id": 37946539538,
+    "created_at": "2026-10-09T14:45:15Z",
+    "actor": "stake-dao-maestro[bot]",
+    "conclusion": "success",
+    "checkpoint_markers": [
+      {
+        "chain_id": 1,
+        "next_from_block": 26155538
+      }
+    ],
+    "dispatch_pipeline": [
+      "tg-bot-vlcvx-delegation"
+    ]
+  },
+  {
+    "workflow": "vlsdt.yml",
+    "name": "Bot vlSDT",
+    "run_id": 37946540678,
+    "created_at": "2026-10-09T14:45:15Z",
+    "actor": "stake-dao-maestro[bot]",
+    "conclusion": "success",
+    "checkpoint_markers": [
+      {
+        "chain_id": 1,
+        "next_from_block": 26155538
+      }
+    ],
+    "dispatch_pipeline": [
+      "tg-bot-vlsdt"
+    ]
+  },
+  {
+    "workflow": "votemarket-v2.yml",
+    "name": "Bot Votemarket",
+    "run_id": 37945904770,
+    "created_at": "2026-10-09T14:40:14Z",
+    "actor": "stake-dao-maestro[bot]",
+    "conclusion": "success",
+    "checkpoint_markers": [
+      {
+        "chain_id": 42161,
+        "next_from_block": 513226821
+      },
+      {
+        "chain_id": 8453,
+        "next_from_block": 52383706
+      },
+      {
+        "chain_id": 10,
+        "next_from_block": 157978997
+      }
+    ],
+    "dispatch_pipeline": [
+      "tg-bot-votemarket-v2"
+    ]
+  },
+  {
+    "workflow": "onlyboost_v2.yml",
+    "name": "Bot Only Boost V2",
+    "run_id": 37946536360,
+    "created_at": "2026-10-09T14:45:13Z",
+    "actor": "stake-dao-maestro[bot]",
+    "conclusion": "success",
+    "checkpoint_markers": [
+      {
+        "chain_id": 1,
+        "next_from_block": 26155538
+      },
+      {
+        "chain_id": 8453,
+        "next_from_block": 52383850
+      },
+      {
+        "chain_id": 42161,
+        "next_from_block": 513227998
+      },
+      {
+        "chain_id": 252,
+        "next_from_block": 42373230
+      },
+      {
+        "chain_id": 10,
+        "next_from_block": 157979143
+      },
+      {
+        "chain_id": 146,
+        "next_from_block": 80645017
+      }
+    ],
+    "dispatch_pipeline": [
+      "tg-bot-onlyboost-v2"
+    ]
+  },
+  {
+    "workflow": "votemarket-incentives.yml",
+    "name": "Bot Votemarket Direct Incentives",
+    "run_id": 37946552893,
+    "created_at": "2026-10-09T14:45:20Z",
+    "actor": "stake-dao-maestro[bot]",
+    "conclusion": "success",
+    "checkpoint_markers": [],
+    "dispatch_pipeline": [
+      "tg-bot-votemarket-incentives"
+    ]
+  },
+  {
+    "workflow": "daily-recap.yml",
+    "name": "Bot Daily recap lockers & SDT",
+    "run_id": 37921060706,
+    "created_at": "2026-10-09T11:00:21Z",
+    "actor": "stake-dao-maestro[bot]",
+    "conclusion": "success",
+    "checkpoint_markers": [],
+    "dispatch_pipeline": [
+      "tg-bot-daily-recap"
+    ]
+  }
+]
