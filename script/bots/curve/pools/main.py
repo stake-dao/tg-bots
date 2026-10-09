@@ -980,10 +980,10 @@ def job():
     checkpoints = {}
 
     web3_service = get_web3_service()
-    for chain_id, rpc_url in GlobalConstants.CHAIN_ID_TO_PUBLIC_RPC.items():
-        web3_service.add_chain(chain_id)
-
     for chainId in GlobalConstants.CHAIN_ID_TO_PUBLIC_RPC:
+        if chainId not in BLOCKCHAIN_IDS:
+            continue
+        web3_service.add_chain(chainId)
         allEvents = []
 
         web3 = web3_service.get_w3(chainId)
@@ -1009,7 +1009,7 @@ def job():
 
                         # Fetch all events
                         tokenEchanges = poolContract.events.Swap().get_logs(
-                            fromBlock=from_block, toBlock=current_block
+                            from_block=from_block, to_block=current_block
                         )
                         for event in tokenEchanges:
                             allEvents.append(
@@ -1025,8 +1025,8 @@ def job():
                         # Fetch all events
                         tokenEchanges = (
                             poolContract.events.TokenExchange().get_logs(
-                                fromBlock=from_block,
-                                toBlock=current_block,
+                                from_block=from_block,
+                                to_block=current_block,
                             )
                         )
                         for event in tokenEchanges:
@@ -1036,8 +1036,8 @@ def job():
 
                         addLiquidity = (
                             poolContract.events.AddLiquidity().get_logs(
-                                fromBlock=from_block,
-                                toBlock=current_block,
+                                from_block=from_block,
+                                to_block=current_block,
                             )
                         )
                         for event in addLiquidity:
@@ -1061,8 +1061,8 @@ def job():
                         # Fetch all events
                         tokenEchanges = (
                             poolContract.events.TokenExchange().get_logs(
-                                fromBlock=from_block,
-                                toBlock=current_block,
+                                from_block=from_block,
+                                to_block=current_block,
                             )
                         )
                         for event in tokenEchanges:
@@ -1072,8 +1072,8 @@ def job():
 
                         addLiquidities = (
                             poolContract.events.AddLiquidity().get_logs(
-                                fromBlock=from_block,
-                                toBlock=current_block,
+                                from_block=from_block,
+                                to_block=current_block,
                             )
                         )
                         for event in addLiquidities:
@@ -1083,8 +1083,8 @@ def job():
 
                         removeLiquidities = (
                             poolContract.events.RemoveLiquidity().get_logs(
-                                fromBlock=from_block,
-                                toBlock=current_block,
+                                from_block=from_block,
+                                to_block=current_block,
                             )
                         )
                         for event in removeLiquidities:
@@ -1096,8 +1096,8 @@ def job():
 
                         removeLiquiditiesOne = (
                             poolContract.events.RemoveLiquidityOne().get_logs(
-                                fromBlock=from_block,
-                                toBlock=current_block,
+                                from_block=from_block,
+                                to_block=current_block,
                             )
                         )
                         for event in removeLiquiditiesOne:
@@ -1117,7 +1117,7 @@ def job():
                         abi=cakeDepositorABI,
                     )
                     deposits = depositorContract.events.Deposited().get_logs(
-                        fromBlock=from_block, toBlock=current_block
+                        from_block=from_block, to_block=current_block
                     )
                     for event in deposits:
                         allEvents.append(
@@ -1129,7 +1129,7 @@ def job():
                         abi=depositorABI,
                     )
                     deposits = depositorContract.events.Deposited().get_logs(
-                        fromBlock=from_block, toBlock=current_block
+                        from_block=from_block, to_block=current_block
                     )
                     for event in deposits:
                         allEvents.append(
@@ -1147,8 +1147,8 @@ def job():
                     abi=erc20ABI,
                 )
                 deposits = tokenContract.events.Transfer().get_logs(
-                    fromBlock=from_block,
-                    toBlock=current_block,
+                    from_block=from_block,
+                    to_block=current_block,
                     argument_filters={
                         "from": Web3.to_checksum_address(ZERO_ADDRESS)
                     },

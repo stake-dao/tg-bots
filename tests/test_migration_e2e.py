@@ -256,7 +256,19 @@ def test_votemarket_multichain_recovers_logs_once_per_run(isolated_bot, monkeypa
     import asyncio
     from bots.votemarket.v2 import votemarket
 
-    state, w3 = isolated_bot
+    from web3 import Web3
+    from web3.providers import BaseProvider
+
+    state, _ = isolated_bot
+    rpc_calls = []
+
+    class Provider(BaseProvider):
+        def make_request(self, method, params):
+            rpc_calls.append((method, params))
+            result = {"eth_getBlockByNumber": {"number": "0x3e8"}, "eth_chainId": "0x1", "eth_getLogs": []}[method]
+            return {"jsonrpc": "2.0", "id": 1, "result": result}
+
+    w3 = Web3(Provider())
     state["extra_checkpoint"] = "\nChain 10 / last block 900"
     service = MagicMock()
     service.w3 = {1: w3, 10: w3}
@@ -266,8 +278,6 @@ def test_votemarket_multichain_recovers_logs_once_per_run(isolated_bot, monkeypa
     monkeypatch.setattr(votemarket, "get_all_platforms", lambda: (
         [{1: [platform], 10: [platform]}, {1: [platform]}], {}, {}
     ))
-    w3.eth.contract.return_value.events.CampaignCreated.return_value.get_logs.return_value = []
-    w3.eth.contract.return_value.events.CampaignUpgradeQueued.return_value.get_logs.return_value = []
     multicall = MagicMock()
     multicall.return_value.call.return_value = []
     monkeypatch.setattr(votemarket, "W3Multicall", multicall)
@@ -276,7 +286,39 @@ def test_votemarket_multichain_recovers_logs_once_per_run(isolated_bot, monkeypa
     assert sum(url.endswith("/logs") for url in state["reads"]) == 1
     assert caplog.text.count("Chain 1 / last block 999") == 1
     assert caplog.text.count("Chain 10 / last block 941") == 1
+    assert sum(method == "eth_getLogs" for method, _ in rpc_calls) == 6
     assert state["payloads"] == []
     state["reads"].clear()
     asyncio.run(votemarket.main())
     assert sum(url.endswith("/logs") for url in state["reads"]) == 1
+
+
+
+def test_lockers_native_event_scans(isolated_bot, monkeypatch, caplog):
+    from web3 import Web3
+    from web3.providers import BaseProvider
+    from bots.curve.pools import main as pools
+
+    state, _ = isolated_bot
+    rpc_calls = []
+
+    class Provider(BaseProvider):
+        def make_request(self, method, params):
+            rpc_calls.append((method, params))
+            result = {"eth_getBlockByNumber": {"number": "0x3e8"}, "eth_chainId": "0x1", "eth_getLogs": []}[method]
+            return {"jsonrpc": "2.0", "id": 1, "result": result}
+
+    service = MagicMock()
+    service.get_w3.return_value = Web3(Provider())
+    chains = list(GlobalConstants.CHAIN_ID_TO_PUBLIC_RPC)
+    state["extra_checkpoint"] = "".join(f"\nChain {chain} / last block 900" for chain in chains if chain != 1)
+    monkeypatch.setattr(pools, "get_web3_service", lambda: service)
+    monkeypatch.setattr(pools, "load_lockers", lambda: [])
+    monkeypatch.setattr(pools, "get_pools_from_api", lambda: [])
+    pools.main()
+    for chain in chains:
+        assert caplog.text.count(f"Chain {chain} / last block") == int(chain in pools.BLOCKCHAIN_IDS)
+    filters = [params[0] for method, params in rpc_calls if method == "eth_getLogs"]
+    assert len(filters) > 10
+    assert all(int(item["fromBlock"], 16) == 900 and int(item["toBlock"], 16) >= 900 for item in filters)
+    assert state["payloads"] == []

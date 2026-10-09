@@ -143,8 +143,8 @@ async def get_campaigns_created(
     )
 
     campaign_created_logs = platformContract.events.CampaignCreated().get_logs(
-        fromBlock=from_block,
-        toBlock=to_block,
+        from_block=from_block,
+        to_block=to_block,
     )
 
     multicall = W3Multicall(web3)
@@ -369,8 +369,8 @@ async def get_campaigns_increased(
 
     campaign_increased_logs = (
         platformContract.events.CampaignUpgradeQueued().get_logs(
-            fromBlock=from_block,
-            toBlock=to_block,
+            from_block=from_block,
+            to_block=to_block,
         )
     )
 
