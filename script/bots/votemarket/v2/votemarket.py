@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 
-from bots.utils.github import OWNER, REPO, TOKEN, GithubLogService
+from shared.bot_runner import get_block_range
 from dotenv import load_dotenv
 from eth_utils import to_checksum_address
 from shared.services.stakedao_api import StakeDAOApiService
@@ -15,7 +15,6 @@ from shared.constants import (
     GlobalConstants,
 )
 from shared.external.explorer import get_explorer_link
-from shared.external.github import get_last_workflow_run
 from shared.utils.formatters import format_amount
 from shared.utils.globals import (
     getHistoricalTokenPrice,
@@ -576,17 +575,7 @@ def get_all_platforms():
 
 
 async def job():
-    # Get last run id
-    last_workflow_run = get_last_workflow_run(OWNER, REPO, WORKFLOW_NAME)
-
-    # Fetch last chain ids <> block
-    github_log_service = GithubLogService()
-    chain_ids_last_blocks = []
-    if last_workflow_run != None:
-        last_run_id = last_workflow_run["id"]
-        chain_ids_last_blocks = github_log_service.extract_chain_id_last_block(
-            OWNER, REPO, last_run_id, TOKEN, None
-        )
+    checkpoints = {}
 
     # Last blocks fetch per chain
     ALL_PLATFORMS, names, gauges_endpoint = get_all_platforms()
@@ -612,9 +601,7 @@ async def job():
             web3 = web3_service.get_w3(chain_id)
 
             block_min, block_max = (
-                github_log_service.get_last_block_and_log(
-                    chain_ids_last_blocks, chain_id, web3
-                )
+                get_block_range(WORKFLOW_NAME, chain_id, web3, checkpoints)
             )
 
             """

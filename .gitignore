@@ -4,5 +4,3 @@ __pycache__/
 logs/
 logs.zip
 .env
-
-json/logs.json

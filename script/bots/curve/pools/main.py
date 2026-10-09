@@ -1,7 +1,7 @@
 import logging
 
 import requests
-from bots.utils.github import OWNER, REPO, TOKEN, GithubLogService
+from shared.bot_runner import get_block_range
 from dotenv import load_dotenv
 from shared.address import format_eth_address
 from shared.communication.telegram import send_telegram_message
@@ -14,7 +14,6 @@ from shared.constants import (
     GlobalConstants,
 )
 from shared.external.explorer import get_explorer_link
-from shared.external.github import get_last_workflow_run
 from shared.protocols.lockers import load_lockers
 from shared.strings import abbreviate_number
 from shared.utils.globals import load_json
@@ -978,17 +977,7 @@ def job():
     # config = loadConfigFromFile()
     lockersApi = load_lockers()
 
-    # Get last run id
-    last_workflow_run = get_last_workflow_run(OWNER, REPO, WORKFLOW_NAME)
-
-    # Fetch last chain ids <> block
-    github_log_service = GithubLogService()
-    chain_ids_last_blocks = []
-    if last_workflow_run != None:
-        last_run_id = last_workflow_run["id"]
-        chain_ids_last_blocks = github_log_service.extract_chain_id_last_block(
-            OWNER, REPO, last_run_id, TOKEN, None
-        )
+    checkpoints = {}
 
     web3_service = get_web3_service()
     for chain_id, rpc_url in GlobalConstants.CHAIN_ID_TO_PUBLIC_RPC.items():
@@ -1000,9 +989,7 @@ def job():
         web3 = web3_service.get_w3(chainId)
 
         # Get the last block fetched
-        from_block, current_block = github_log_service.get_last_block_and_log(
-            chain_ids_last_blocks, chainId, web3
-        )
+        from_block, current_block = get_block_range(WORKFLOW_NAME, chainId, web3, checkpoints)
 
         if from_block == 0:
             continue

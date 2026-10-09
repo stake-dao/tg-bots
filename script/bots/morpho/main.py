@@ -14,12 +14,7 @@ from typing import Dict, List, NamedTuple, Optional
 
 from bots.morpho.markets import MarketMetadata, fetch_stakedao_aprs, get_active_markets
 from shared.services.morpho_api import get_morpho_api_service
-from bots.utils.github import (
-    OWNER,
-    REPO,
-    TOKEN,
-    GithubLogService,
-)
+from shared.bot_runner import get_block_range
 from dotenv import load_dotenv
 from shared.services.etherscan_service import get_logs_by_address_and_topics
 from shared.services.web3_service import get_web3_service
@@ -29,7 +24,6 @@ from shared.constants import Common, ContractRegistry, GlobalConstants
 from shared.utils.formatters import format_amount
 from shared.utils.safe import format_user_info, is_safe_multisig
 from bots.utils.telegram_format import format_activity_header
-from shared.external.github import get_last_workflow_run
 from shared.utils.globals import decode_hex_data, replace_double_quotes_with_single
 from web3 import Web3
 
@@ -604,24 +598,10 @@ def fetch_liquidations(
 
 def job():
     """Main job function to fetch events and send notifications."""
-    # Get last workflow run
-    last_workflow_run = get_last_workflow_run(OWNER, REPO, WORKFLOW_NAME)
-
-    # Fetch last block from workflow logs
-    github_log_service = GithubLogService()
-    chain_ids_last_blocks = []
-    if last_workflow_run is not None:
-        last_run_id = last_workflow_run["id"]
-        chain_ids_last_blocks = github_log_service.extract_chain_id_last_block(
-            OWNER, REPO, last_run_id, TOKEN, None
-        )
-
     web3_service = get_web3_service(1)
     web3 = web3_service.get_w3(1)
 
-    from_block, current_block = github_log_service.get_last_block_and_log(
-        chain_ids_last_blocks, 1, web3
-    )
+    from_block, current_block = get_block_range(WORKFLOW_NAME, 1, web3)
 
     # TEMP
     # from_block = 24683889

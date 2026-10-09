@@ -26,14 +26,7 @@ from w3multicall.multicall import W3Multicall
 
 
 from web3 import HTTPProvider, Web3
-
-
-try:  # web3.py 6.x
-    from web3._utils.request import (
-        cache_and_return_session as _cache_w3_session_module,
-    )
-except ImportError:  # web3.py 7.x — handled via provider._request_session_manager
-    _cache_w3_session_module = None
+from web3.middleware import ExtraDataToPOAMiddleware
 
 
 def _make_retry_session() -> requests.Session:
@@ -77,22 +70,9 @@ class FallbackHTTPProvider(HTTPProvider):
             self._register_retry_session(uri)
 
     def _register_retry_session(self, uri: str) -> None:
-        """Best-effort: bind a retrying requests session to ``uri``."""
-        session = _make_retry_session()
-        # web3.py 7.x: per-provider session manager.
-        manager = getattr(self, "_request_session_manager", None)
-        if manager is not None and hasattr(manager, "cache_and_return_session"):
-            try:
-                manager.cache_and_return_session(uri, session)
-                return
-            except Exception:  # pragma: no cover - defensive
-                pass
-        # web3.py 6.x: module-level session cache.
-        if _cache_w3_session_module is not None:
-            try:
-                _cache_w3_session_module(uri, session)
-            except Exception:  # pragma: no cover - defensive
-                pass
+        self._request_session_manager.cache_and_return_session(
+            uri, _make_retry_session()
+        )
 
     def _advance(self) -> None:
         self._endpoint_index = (self._endpoint_index + 1) % len(self._endpoints)
@@ -114,20 +94,6 @@ class FallbackHTTPProvider(HTTPProvider):
         raise last_error
 
 
-try:
-    from web3.middleware import geth_poa_middleware
-except ImportError:
-    try:
-        from web3.middleware import (
-            ExtraDataToPOAMiddleware as geth_poa_middleware,
-        )
-    except ImportError:
-        # For even newer versions
-        from web3.middleware import ExtraDataToPOAMiddleware
-
-        geth_poa_middleware = ExtraDataToPOAMiddleware
-
-
 def build_web3(chain_id: int, override: Optional[str] = None) -> Web3:
     """Build a fallback-aware Web3 instance for a chain.
 
@@ -142,14 +108,7 @@ def build_web3(chain_id: int, override: Optional[str] = None) -> Web3:
         endpoints = [override, *endpoints]
     w3 = Web3(FallbackHTTPProvider(endpoints))
     if chain_id in (56, 137):  # BSC and Polygon require POA middleware
-        try:
-            if hasattr(w3, "middleware_onion"):
-                w3.middleware_onion.inject(geth_poa_middleware, layer=0)
-        except Exception:
-            try:
-                w3.middleware_onion.inject(geth_poa_middleware, layer=0)
-            except AttributeError:
-                pass
+        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
     return w3
 
 

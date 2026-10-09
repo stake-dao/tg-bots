@@ -312,13 +312,17 @@ def send_incentive_notification(incentive, gauge_map: dict, tvl_map: dict):
     if links:
         msg += f"Links: {' | '.join(links)}"
 
-    send_telegram_message(
+    sent = send_telegram_message(
         GlobalConstants.BOT_VOTEMARKET_API_KEY,
         GlobalConstants.VOTEMARKET_CHANNEL_ID,
         replace_double_quotes_with_single(msg),
     )
 
+    if not sent:
+        return False
+
     logging.info(f"Sent notification for incentive ID {incentive.get('id')}: {amount_formatted} {reward_symbol}")
+    return True
 
 
 def job(start_from_timestamp=None):
@@ -366,11 +370,14 @@ def job(start_from_timestamp=None):
 
         # Send notification
         try:
-            send_incentive_notification(incentive, gauge_map, tvl_map)
+            if not send_incentive_notification(incentive, gauge_map, tvl_map):
+                logging.error(f"Delivery failed for incentive {incentive_id}")
+                continue
             new_count += 1
             time.sleep(1)  # Rate limiting
         except Exception as e:
             logging.error(f"Error sending notification for incentive {incentive_id}: {e}")
+            continue
 
         seen_ids.add(incentive_id)
 

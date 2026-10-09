@@ -5,7 +5,6 @@ import time
 
 from requests.exceptions import HTTPError
 
-from shared.communication.logger import logger
 from shared.external.github import download_logs, extract_logs
 
 logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
@@ -87,7 +86,7 @@ class GithubLogService:
                 status = getattr(e.response, "status_code", None)
                 if status != 429:
                     raise
-                logger.log(
+                logging.info(
                     f"RPC 429 on chain {chain_id} (attempt {attempt + 1}/{max_attempts}), "
                     f"retrying in {base_delay:.1f}s"
                 )
@@ -113,10 +112,10 @@ class GithubLogService:
             )
             current_block = max(min_block, current_block - margin)
 
-            logger.log(f"Last block found for chain id {chain_id} : {min_block}")
+            logging.info(f"Last block found for chain id {chain_id} : {min_block}")
 
             # Log the chain id & block for the next run
-            logger.log(f"Chain {chain_id} / last block {current_block + 1}")
+            logging.info(f"Chain {chain_id} / last block {current_block + 1}")
 
             self.chain_logged[chain_id] = [min_block, current_block]
 
