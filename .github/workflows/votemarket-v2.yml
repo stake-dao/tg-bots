@@ -1,6 +1,8 @@
 name: Bot Votemarket
 
 on:
+  schedule:
+    - cron: "*/10 * * * *"
   workflow_dispatch:
     inputs:
       dispatch_id:
@@ -25,6 +27,7 @@ env:
 
 jobs:
   build:
+    if: github.event_name != 'schedule' || vars.BOT_CRON_VOTEMARKET_V2 == 'true'
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:

@@ -82,7 +82,6 @@ python3.10 -m venv .venv
 .venv/bin/pip install -r requirements.txt pytest==8.2.2
 .venv/bin/python tools/validate.py
 actionlint
-git apply --check cutover/github-crons.patch
 git diff --check
 ```
 
