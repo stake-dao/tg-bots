@@ -1,6 +1,8 @@
 name: Bot Votemarket Direct Incentives
 
 on:
+  schedule:
+    - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
       dispatch_id:
@@ -29,6 +31,7 @@ env:
 
 jobs:
   build:
+    if: github.event_name != 'schedule' || vars.BOT_CRON_VOTEMARKET_INCENTIVES == 'true'
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:

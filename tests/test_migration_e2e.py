@@ -217,6 +217,7 @@ def test_pool_api_and_compact_fallback_deliver_identical_messages(monkeypatch, h
     for data in [api_pools, fallback_pools]:
         getattr(pools, handler)(w3, pool["address"], event, data, "ethereum", 1)
     assert len(payloads) == 2
+    assert "/tx/0x" + "ab" * 32 in payloads[0]["text"]
     assert payloads[0] == payloads[1]
     assert payloads[0]["chat_id"] == "@SDLiquidLockerBot"
 
@@ -252,11 +253,26 @@ def test_native_web3_keeps_rpc_fallback_and_poa(monkeypatch):
 
 
 
-def test_votemarket_multichain_recovers_logs_once_per_run(isolated_bot, monkeypatch, caplog):
+@pytest.mark.parametrize("rpc_fails", [False, True])
+def test_votemarket_multichain_recovers_logs_once_per_run(isolated_bot, monkeypatch, caplog, rpc_fails):
     import asyncio
     from bots.votemarket.v2 import votemarket
 
-    state, w3 = isolated_bot
+    from web3 import Web3
+    from web3.providers import BaseProvider
+
+    state, _ = isolated_bot
+    rpc_calls = []
+
+    class Provider(BaseProvider):
+        def make_request(self, method, params):
+            rpc_calls.append((method, params))
+            if rpc_fails and method == "eth_getLogs":
+                raise ConnectionError("fixture RPC unavailable")
+            result = {"eth_getBlockByNumber": {"number": "0x3e8"}, "eth_chainId": "0x1", "eth_getLogs": []}[method]
+            return {"jsonrpc": "2.0", "id": 1, "result": result}
+
+    w3 = Web3(Provider())
     state["extra_checkpoint"] = "\nChain 10 / last block 900"
     service = MagicMock()
     service.w3 = {1: w3, 10: w3}
@@ -266,17 +282,102 @@ def test_votemarket_multichain_recovers_logs_once_per_run(isolated_bot, monkeypa
     monkeypatch.setattr(votemarket, "get_all_platforms", lambda: (
         [{1: [platform], 10: [platform]}, {1: [platform]}], {}, {}
     ))
-    w3.eth.contract.return_value.events.CampaignCreated.return_value.get_logs.return_value = []
-    w3.eth.contract.return_value.events.CampaignUpgradeQueued.return_value.get_logs.return_value = []
     multicall = MagicMock()
     multicall.return_value.call.return_value = []
     monkeypatch.setattr(votemarket, "W3Multicall", multicall)
     monkeypatch.setattr(votemarket.time, "sleep", lambda seconds: None)
+    if rpc_fails:
+        with pytest.raises(ConnectionError):
+            asyncio.run(votemarket.main())
+        assert state["payloads"] == []
+        return
     asyncio.run(votemarket.main())
     assert sum(url.endswith("/logs") for url in state["reads"]) == 1
     assert caplog.text.count("Chain 1 / last block 999") == 1
     assert caplog.text.count("Chain 10 / last block 941") == 1
+    assert sum(method == "eth_getLogs" for method, _ in rpc_calls) == 6
     assert state["payloads"] == []
     state["reads"].clear()
     asyncio.run(votemarket.main())
     assert sum(url.endswith("/logs") for url in state["reads"]) == 1
+
+
+
+def test_lockers_native_event_scans(isolated_bot, monkeypatch, caplog):
+    from web3 import Web3
+    from web3.providers import BaseProvider
+    from bots.curve.pools import main as pools
+
+    state, _ = isolated_bot
+    rpc_calls = []
+
+    class Provider(BaseProvider):
+        def make_request(self, method, params):
+            rpc_calls.append((method, params))
+            result = {"eth_getBlockByNumber": {"number": "0x3e8"}, "eth_chainId": "0x1", "eth_getLogs": []}[method]
+            return {"jsonrpc": "2.0", "id": 1, "result": result}
+
+    service = MagicMock()
+    service.get_w3.return_value = Web3(Provider())
+    chains = list(GlobalConstants.CHAIN_ID_TO_PUBLIC_RPC)
+    state["extra_checkpoint"] = "".join(f"\nChain {chain} / last block 900" for chain in chains if chain != 1)
+    monkeypatch.setattr(pools, "get_web3_service", lambda: service)
+    monkeypatch.setattr(pools, "load_lockers", lambda: [])
+    monkeypatch.setattr(pools, "get_pools_from_api", lambda: [])
+    pools.main()
+    for chain in chains:
+        assert caplog.text.count(f"Chain {chain} / last block") == int(chain in pools.BLOCKCHAIN_IDS)
+    filters = [params[0] for method, params in rpc_calls if method == "eth_getLogs"]
+    assert len(filters) > 10
+    assert all(int(item["fromBlock"], 16) == 900 and int(item["toBlock"], 16) >= 900 for item in filters)
+    assert state["payloads"] == []
+
+
+
+@pytest.mark.parametrize("rpc_fails", [False, True])
+def test_onlyboost_native_scans_preserve_redis(isolated_bot, monkeypatch, caplog, rpc_fails):
+    from web3 import Web3
+    from web3.providers import BaseProvider
+    from bots.onlyboost_v2 import main as onlyboost
+
+    state, _ = isolated_bot
+    records = {"1": "900", "42161": "900", "146": "900"}
+    rpc_calls = []
+
+    class Provider(BaseProvider):
+        def make_request(self, method, params):
+            if method == "eth_getLogs":
+                assert all(topic.startswith("0x") and len(topic) == 66 for topic in params[0]["topics"])
+                if rpc_fails:
+                    raise ConnectionError("fixture RPC unavailable")
+                rpc_calls.append(params[0])
+            result = {"eth_getBlockByNumber": {"number": "0x3e8"}, "eth_chainId": "0x1", "eth_getLogs": [], "eth_call": "0x" + "00" * 32}[method]
+            return {"jsonrpc": "2.0", "id": 1, "result": result}
+
+    redis = MagicMock()
+    redis.__enter__.return_value = redis
+    redis.hgetall.side_effect = lambda key: records.copy()
+    redis.hset.side_effect = lambda key, field, value: records.update({str(field): str(value)})
+    monkeypatch.setattr(onlyboost, "get_redis_client", lambda: redis)
+    monkeypatch.setattr(onlyboost, "PROD", True)
+    monkeypatch.setattr(onlyboost, "DRY_RUN", False)
+    service = MagicMock()
+    service.w3 = {int(chain): Web3(Provider()) for chain in records}
+    service.get_w3.side_effect = lambda chain: service.w3[chain]
+    monkeypatch.setattr(onlyboost, "get_web3_service", lambda chain: service)
+    monkeypatch.setattr(onlyboost.OnlyBoostV2Bot, "get_alternate_web3", lambda self, chain: None)
+    monkeypatch.setattr(onlyboost.OnlyBoostV2Bot, "_fetch_ipor_vaults", lambda self: None)
+    monkeypatch.setattr(onlyboost.OnlyBoostV2Bot, "_fetch_beefy_vaults", lambda self: None)
+    monkeypatch.setattr(onlyboost, "fetch_adapted_vaults", lambda: [
+        {"address": "0x00000000000000000000000000000000000000A1", "chainId": int(chain)} for chain in records
+    ])
+    onlyboost.main()
+    if rpc_fails:
+        assert records == {"1": "900", "42161": "900", "146": "900"}
+    else:
+        assert records == {"1": "999", "42161": "901", "146": "971"}
+        assert len(rpc_calls) == 6
+        assert "failed, skipping" not in caplog.text
+        onlyboost.main()
+        assert records == {"1": "1000", "42161": "902", "146": "972"}
+    assert state["payloads"] == []

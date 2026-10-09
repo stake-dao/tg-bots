@@ -143,8 +143,8 @@ async def get_campaigns_created(
     )
 
     campaign_created_logs = platformContract.events.CampaignCreated().get_logs(
-        fromBlock=from_block,
-        toBlock=to_block,
+        from_block=from_block,
+        to_block=to_block,
     )
 
     multicall = W3Multicall(web3)
@@ -221,7 +221,7 @@ async def get_campaigns_created(
         token_amount_price_formatted = format_amount(token_price * token_amount)
         reward_per_round_price_formatted = format_amount(token_price * reward_per_round)
 
-        tx_link = f'<a href="{get_explorer_link(chain_id)}/tx/{log["transactionHash"].hex()}">🔗 Tx Hash</a>'
+        tx_link = f'<a href="{get_explorer_link(chain_id)}/tx/{Web3.to_hex(log["transactionHash"])}">🔗 Tx Hash</a>'
         gauge_name, gauge_chain_id = await get_gauge_info(
             web3, platform_address, gauges_endpoint, gauge
         )
@@ -369,8 +369,8 @@ async def get_campaigns_increased(
 
     campaign_increased_logs = (
         platformContract.events.CampaignUpgradeQueued().get_logs(
-            fromBlock=from_block,
-            toBlock=to_block,
+            from_block=from_block,
+            to_block=to_block,
         )
     )
 
@@ -482,7 +482,7 @@ async def get_campaigns_increased(
         reward_added_formatted = format_amount(reward_added, symbol=symbol)
         reward_added_price_formatted = format_amount(reward_added * token_price)
 
-        tx_link = f'<a href="{get_explorer_link(chain_id)}/tx/{log["transactionHash"].hex()}">🔗 Tx Hash</a>'
+        tx_link = f'<a href="{get_explorer_link(chain_id)}/tx/{Web3.to_hex(log["transactionHash"])}">🔗 Tx Hash</a>'
 
         gauge = campaign[1]
         gauge_name, gauge_chain_id = await get_gauge_info(
@@ -617,36 +617,31 @@ async def job():
                 continue
 
             for platform_address in platform_addresses:
-                try:
-                    await get_campaigns_created(
-                        web3,
-                        chain_id,
-                        platform_address,
-                        block_min,
-                        block_max,
-                        names,
-                        gauges_endpoint,
-                    )
+                await get_campaigns_created(
+                    web3,
+                    chain_id,
+                    platform_address,
+                    block_min,
+                    block_max,
+                    names,
+                    gauges_endpoint,
+                )
 
-                    # Rate limit
-                    time.sleep(5)
+                # Rate limit
+                time.sleep(5)
 
-                    await get_campaigns_increased(
-                        web3,
-                        chain_id,
-                        platform_address,
-                        block_min,
-                        block_max,
-                        names,
-                        gauges_endpoint,
-                    )
+                await get_campaigns_increased(
+                    web3,
+                    chain_id,
+                    platform_address,
+                    block_min,
+                    block_max,
+                    names,
+                    gauges_endpoint,
+                )
 
-                    # Rate limit
-                    time.sleep(5)
-                except Exception as e:
-                    # If RPC error : "429 Client Error: Too Many Requests"
-                    print(e)
-                    time.sleep(5)
+                # Rate limit
+                time.sleep(5)
 
 
 async def main():
