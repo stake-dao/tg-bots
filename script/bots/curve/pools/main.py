@@ -180,7 +180,7 @@ def getMsgUser(w3, event, explorerLink):
                     if (
                         log["address"].lower() == COWSWAP_SETTLEMENT.lower()
                         and len(log["topics"]) > 1
-                        and log["topics"][0].hex().lower() == COWSWAP_TRADE_TOPIC.lower()
+                        and Web3.to_hex(log["topics"][0]).lower() == COWSWAP_TRADE_TOPIC.lower()
                     ):
                         # The owner (real user) is the first indexed parameter (topics[1])
                         owner_address = "0x" + log["topics"][1].hex()[-40:]
@@ -301,7 +301,7 @@ def manageSwapStable(w3, poolAddress, event, chainId):
             tokenBoughtBalancePool / 10**tokenBoughtDecimals
         )
 
-        txHash = event["transactionHash"].hex()
+        txHash = Web3.to_hex(event["transactionHash"])
         explorerLink = get_explorer_link(chainId)
 
         suffix = " "
@@ -335,7 +335,7 @@ def manageAddLiquidityStable(w3, poolAddress, event, chainId):
         blockNumber = event["blockNumber"]
         args = event["args"]
         token_amounts = args["token_amounts"]
-        txHash = event["transactionHash"].hex()
+        txHash = Web3.to_hex(event["transactionHash"])
         explorerLink = get_explorer_link(chainId)
 
         msg = f"<a href='{explorerLink}/tx/{txHash}'>Add</a> liquidity on sdCAKE pool\n\n"
@@ -470,7 +470,7 @@ def manageSwapV3(w3, poolAddress, event, chainId):
             token1BalancePool / 10**token1Decimals
         )
 
-        txHash = event["transactionHash"].hex()
+        txHash = Web3.to_hex(event["transactionHash"])
         explorerLink = get_explorer_link(chainId)
 
         suffix = " "
@@ -528,7 +528,7 @@ def manageTokenEchange(
             return
 
         poolName = getPoolName(pool)
-        txHash = event["transactionHash"].hex()
+        txHash = Web3.to_hex(event["transactionHash"])
         explorerLink = get_explorer_link(chainId)
 
         # Determine swap direction: Buy (🟩) or Sell (🟥)
@@ -593,7 +593,7 @@ def manageLiquidity(
             action = "Removed"
 
         poolName = getPoolName(pool)
-        txHash = event["transactionHash"].hex()
+        txHash = Web3.to_hex(event["transactionHash"])
         explorerLink = get_explorer_link(chainId)
 
         msg = f"<a href='{explorerLink}/tx/{txHash}'>{label}</a> liquidity on {poolName} pool\n\n"
@@ -681,7 +681,7 @@ def manageRemoveLiquidityOneCoin(
             return
 
         poolName = getPoolName(pool)
-        txHash = event["transactionHash"].hex()
+        txHash = Web3.to_hex(event["transactionHash"])
         explorerLink = get_explorer_link(chainId)
 
         msg = f"<a href='{explorerLink}/tx/{txHash}'>Remove</a> liquidity on {poolName} pool\n"
@@ -783,7 +783,7 @@ def manageDeposit(w3, event, chainId, lockersApi):
         formatted_supply_locked = abbreviate_number(supplyLocked)
 
         explorerLink = get_explorer_link(chainId)
-        txHash = event["transactionHash"].hex()
+        txHash = Web3.to_hex(event["transactionHash"])
 
         msg = f"<a href='{explorerLink}/tx/{txHash}'>Mint :</a> {formatted_coin_amount_received} sd{tokenSymbol.upper()}\n"
         msg += getMsgUser(w3, event, explorerLink)
@@ -899,7 +899,7 @@ def manageDepositWithTransfer(w3, event, chainId, lockersApi):
         formatted_supply_locked = abbreviate_number(supplyLocked)
 
         explorerLink = get_explorer_link(chainId)
-        txHash = event["transactionHash"].hex()
+        txHash = Web3.to_hex(event["transactionHash"])
 
         msg = f"<a href='{explorerLink}/tx/{txHash}'>Mint :</a> {formatted_coin_amount_received} sd{tokenSymbol.upper()}\n"
         msg += getMsgUser(w3, event, explorerLink)
@@ -1162,7 +1162,7 @@ def job():
         # Remove same event
         eventsMap = {}
         for event in allEvents:
-            hash = event["transactionHash"].hex()
+            hash = Web3.to_hex(event["transactionHash"])
             if hash not in eventsMap:
                 eventsMap[hash] = {}
 

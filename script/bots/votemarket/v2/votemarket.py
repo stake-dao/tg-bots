@@ -221,7 +221,7 @@ async def get_campaigns_created(
         token_amount_price_formatted = format_amount(token_price * token_amount)
         reward_per_round_price_formatted = format_amount(token_price * reward_per_round)
 
-        tx_link = f'<a href="{get_explorer_link(chain_id)}/tx/{log["transactionHash"].hex()}">🔗 Tx Hash</a>'
+        tx_link = f'<a href="{get_explorer_link(chain_id)}/tx/{Web3.to_hex(log["transactionHash"])}">🔗 Tx Hash</a>'
         gauge_name, gauge_chain_id = await get_gauge_info(
             web3, platform_address, gauges_endpoint, gauge
         )
@@ -482,7 +482,7 @@ async def get_campaigns_increased(
         reward_added_formatted = format_amount(reward_added, symbol=symbol)
         reward_added_price_formatted = format_amount(reward_added * token_price)
 
-        tx_link = f'<a href="{get_explorer_link(chain_id)}/tx/{log["transactionHash"].hex()}">🔗 Tx Hash</a>'
+        tx_link = f'<a href="{get_explorer_link(chain_id)}/tx/{Web3.to_hex(log["transactionHash"])}">🔗 Tx Hash</a>'
 
         gauge = campaign[1]
         gauge_name, gauge_chain_id = await get_gauge_info(

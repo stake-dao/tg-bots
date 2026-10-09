@@ -217,6 +217,7 @@ def test_pool_api_and_compact_fallback_deliver_identical_messages(monkeypatch, h
     for data in [api_pools, fallback_pools]:
         getattr(pools, handler)(w3, pool["address"], event, data, "ethereum", 1)
     assert len(payloads) == 2
+    assert "/tx/0x" + "ab" * 32 in payloads[0]["text"]
     assert payloads[0] == payloads[1]
     assert payloads[0]["chat_id"] == "@SDLiquidLockerBot"
 

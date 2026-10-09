@@ -1047,7 +1047,7 @@ class OnlyBoostV2Bot:
             # Get event details
             tx_hash = event["transactionHash"]
             if hasattr(tx_hash, "hex"):
-                tx_hash = tx_hash.hex()
+                tx_hash = Web3.to_hex(tx_hash)
             block_number = event["blockNumber"]
 
             # Get user and amount based on event type
