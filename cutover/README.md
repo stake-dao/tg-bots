@@ -1,8 +1,8 @@
 # Cutover and rollback
 
-Extraction was merged in tg-bots #25. Telegram-only scheduler retirement was merged in orchestrator #129; Guard promotion #128 remains separate. Retirement removes only the nine schedule blocks and preserves manual pipelines and task queues.
+Extraction was merged in tg-bots #25. Telegram-only scheduler retirement was merged in orchestrator #129; Guard promotion #128 remains separate. That retirement removed the nine schedule blocks. The follow-up removes the nine manual pipeline definitions from Maestro's catalog; manual dispatch remains available in tg-bots. Task queues are unchanged.
 
-Crons live in the nine workflow files. They remain inert until their repository variables are enabled after retirement deployment, old-schedule removal and production canaries.
+Crons live in the nine workflow files. All nine repository variables were verified enabled after retirement deployment on October 9.
 
 Each scheduled job requires its own repository variable to equal the exact string `true`. Missing/false variables skip scheduled jobs. Manual dispatch remains available. Do not enable these variables while Maestro owns the bots.
 
@@ -54,7 +54,7 @@ Global schedule reconciliation can affect other pipelines; review its response a
 1. Set every affected `BOT_CRON_*` variable to `false`. Prevent manual dispatch. Wait for running and pending Actions jobs and any manual canaries to finish; a variable change does not cancel jobs already started.
 2. Preserve current Actions logs, next-block markers and Redis state. Reconcile partial deliveries before any replay. Never restore an older Redis snapshot or replay from an old block blindly.
 3. If extraction code is the problem, revert it through the normal reviewed GitHub change while schedules are off. Restore the private checkout only if explicitly approved and its source remains compatible with the now-current shared state and credentials. The old positional checkpoint lookup cannot safely follow skipped cron runs; retain the new lookup or restore a reviewed checkpoint-compatible workflow before enabling it.
-4. Restore the nine orchestrator schedule blocks through a reviewed change. Reconcile while cron variables remain false. Deleted schedules are recreated paused because the original YAML says `paused: true`; verify actual descriptions rather than assuming this occurred.
+4. Restore the nine orchestrator pipeline definitions and their schedule blocks through a reviewed change. Reconcile while cron variables remain false. Deleted schedules are recreated paused because the original YAML says `paused: true`; verify actual descriptions rather than assuming this occurred.
 5. Confirm GitHub has no running/pending bot jobs. Unpause only the affected live Maestro schedules. Verify dispatch attribution/tracking IDs and unchanged checkpoint/key continuity. Keep GitHub cron variables false or remove the cron definitions. Never enable both owners.
 
 No automatic rollback resets state. A timeout, missing marker, partial delivery or expired log requires an explicit checkpoint/delivery reconciliation before restart.

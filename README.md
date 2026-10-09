@@ -1,8 +1,8 @@
 # Telegram bots
 
-Standalone extraction for the nine active Stake DAO bots. Workflows remain dispatch-only; production cutover is a separate change. No private checkout, private Git history, Ape, deployment tooling or VoteMarket proof toolkit is required.
+Standalone runtime for the nine active Stake DAO bots. GitHub Actions owns scheduling; each cron is gated by its `BOT_CRON_*` repository variable. Manual dispatch remains available in this repository. See [cutover status and rollback](cutover/README.md). No private checkout, private Git history, Ape, deployment tooling or VoteMarket proof toolkit is required.
 
-| Workflow file / preserved name | Entrypoint under `script/bots/` | State | Prepared UTC cron |
+| Workflow file / preserved name | Entrypoint under `script/bots/` | State | UTC cron |
 | --- | --- | --- | --- |
 | `asdcrv.yml` / Bot Llamalend asdcrv | `asdcrv/main.py` | Actions logs | `*/5 * * * *` |
 | `curve-pools.yml` / Bot Lockers | `curve/pools/main.py` | Actions logs | `*/5 * * * *` |
