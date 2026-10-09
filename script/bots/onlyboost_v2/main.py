@@ -87,10 +87,10 @@ strategyV2ABI = load_json("abi/strategy_v2")
 # Vault event topic0 hashes (constant — ERC4626 standard signatures used by vault_v2)
 DEPOSIT_TOPIC0 = Web3.keccak(
     text="Deposit(address,address,uint256,uint256)"
-).hex()
+).to_0x_hex()
 WITHDRAW_TOPIC0 = Web3.keccak(
     text="Withdraw(address,address,address,uint256,uint256)"
-).hex()
+).to_0x_hex()
 
 # APR calculation is now handled by shared.utils.apr module
 # The module correctly applies 16.5% fee only to base protocol rewards (CRV),

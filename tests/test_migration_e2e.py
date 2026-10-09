@@ -322,3 +322,53 @@ def test_lockers_native_event_scans(isolated_bot, monkeypatch, caplog):
     assert len(filters) > 10
     assert all(int(item["fromBlock"], 16) == 900 and int(item["toBlock"], 16) >= 900 for item in filters)
     assert state["payloads"] == []
+
+
+
+@pytest.mark.parametrize("rpc_fails", [False, True])
+def test_onlyboost_native_scans_preserve_redis(isolated_bot, monkeypatch, caplog, rpc_fails):
+    from web3 import Web3
+    from web3.providers import BaseProvider
+    from bots.onlyboost_v2 import main as onlyboost
+
+    state, _ = isolated_bot
+    records = {"1": "900", "42161": "900", "146": "900"}
+    rpc_calls = []
+
+    class Provider(BaseProvider):
+        def make_request(self, method, params):
+            if method == "eth_getLogs":
+                assert all(topic.startswith("0x") and len(topic) == 66 for topic in params[0]["topics"])
+                if rpc_fails:
+                    raise ConnectionError("fixture RPC unavailable")
+                rpc_calls.append(params[0])
+            result = {"eth_getBlockByNumber": {"number": "0x3e8"}, "eth_chainId": "0x1", "eth_getLogs": [], "eth_call": "0x" + "00" * 32}[method]
+            return {"jsonrpc": "2.0", "id": 1, "result": result}
+
+    redis = MagicMock()
+    redis.__enter__.return_value = redis
+    redis.hgetall.side_effect = lambda key: records.copy()
+    redis.hset.side_effect = lambda key, field, value: records.update({str(field): str(value)})
+    monkeypatch.setattr(onlyboost, "get_redis_client", lambda: redis)
+    monkeypatch.setattr(onlyboost, "PROD", True)
+    monkeypatch.setattr(onlyboost, "DRY_RUN", False)
+    service = MagicMock()
+    service.w3 = {int(chain): Web3(Provider()) for chain in records}
+    service.get_w3.side_effect = lambda chain: service.w3[chain]
+    monkeypatch.setattr(onlyboost, "get_web3_service", lambda chain: service)
+    monkeypatch.setattr(onlyboost.OnlyBoostV2Bot, "get_alternate_web3", lambda self, chain: None)
+    monkeypatch.setattr(onlyboost.OnlyBoostV2Bot, "_fetch_ipor_vaults", lambda self: None)
+    monkeypatch.setattr(onlyboost.OnlyBoostV2Bot, "_fetch_beefy_vaults", lambda self: None)
+    monkeypatch.setattr(onlyboost, "fetch_adapted_vaults", lambda: [
+        {"address": "0x00000000000000000000000000000000000000A1", "chainId": int(chain)} for chain in records
+    ])
+    onlyboost.main()
+    if rpc_fails:
+        assert records == {"1": "900", "42161": "900", "146": "900"}
+    else:
+        assert records == {"1": "999", "42161": "901", "146": "971"}
+        assert len(rpc_calls) == 6
+        assert "failed, skipping" not in caplog.text
+        onlyboost.main()
+        assert records == {"1": "1000", "42161": "902", "146": "972"}
+    assert state["payloads"] == []
