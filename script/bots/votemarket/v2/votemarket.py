@@ -28,6 +28,8 @@ load_dotenv()
 logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
 
 WORKFLOW_NAME = "votemarket-v2"
+# Arbitrum RPC rejects getLogs queries spanning more than 30,000 blocks.
+LOG_BLOCK_BATCH_SIZE = 30000
 
 KNOW_ADDRESSES = [
     # Curve
@@ -142,10 +144,14 @@ async def get_campaigns_created(
         abi=get_abi(platform_address),
     )
 
-    campaign_created_logs = platformContract.events.CampaignCreated().get_logs(
-        from_block=from_block,
-        to_block=to_block,
-    )
+    campaign_created_logs = []
+    for start in range(from_block, to_block + 1, LOG_BLOCK_BATCH_SIZE):
+        campaign_created_logs.extend(
+            platformContract.events.CampaignCreated().get_logs(
+                from_block=start,
+                to_block=min(start + LOG_BLOCK_BATCH_SIZE - 1, to_block),
+            )
+        )
 
     multicall = W3Multicall(web3)
 
@@ -367,12 +373,14 @@ async def get_campaigns_increased(
         abi=get_abi(platform_address),
     )
 
-    campaign_increased_logs = (
-        platformContract.events.CampaignUpgradeQueued().get_logs(
-            from_block=from_block,
-            to_block=to_block,
+    campaign_increased_logs = []
+    for start in range(from_block, to_block + 1, LOG_BLOCK_BATCH_SIZE):
+        campaign_increased_logs.extend(
+            platformContract.events.CampaignUpgradeQueued().get_logs(
+                from_block=start,
+                to_block=min(start + LOG_BLOCK_BATCH_SIZE - 1, to_block),
+            )
         )
-    )
 
     multicall = W3Multicall(web3)
 
