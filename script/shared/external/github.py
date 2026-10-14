@@ -1,19 +1,25 @@
 import os
-
-
 import shutil
-
-
 import time
-
-
 import zipfile
-
 
 import requests
 
 
 GITHUB_API_URL = "https://api.github.com"
+
+
+class LogsUnavailable(RuntimeError):
+    """A run's logs are gone (expired or deleted)."""
+
+
+# Run conclusions proving the bot actually executed: a cron gated off by its
+# BOT_CRON_* variable leaves a run (and its job) with conclusion "skipped".
+EXECUTED_CONCLUSIONS = ("success", "failure", "cancelled", "timed_out")
+
+
+def _headers():
+    return {"Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}"}
 
 
 def download_logs(owner, repo, run_id, token, output_file="logs.zip"):
@@ -30,6 +36,8 @@ def download_logs(owner, repo, run_id, token, output_file="logs.zip"):
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
         print(f"Logs downloaded : {output_file}")
+    elif response.status_code in (404, 410):
+        raise LogsUnavailable(f"Checkpoint log download failed: HTTP {response.status_code}")
     else:
         raise RuntimeError(f"Checkpoint log download failed: HTTP {response.status_code}")
 
@@ -44,18 +52,18 @@ def extract_logs(zip_file, output_dir):
     print(f"Logs extracted here : {output_dir}")
 
 
-def get_last_workflow_run(owner, repo, workflow_name):
+def _list_workflow_runs(owner, repo, workflow_name, params):
     url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/actions/workflows/{workflow_name}.yml/runs"
-    headers = {"Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}"}
-    response = requests.get(
-        url,
-        headers=headers,
-        params={"status": "success", "per_page": 100},
-        timeout=30,
-    )
+    response = requests.get(url, headers=_headers(), params=params, timeout=30)
     if response.status_code != 200:
         raise RuntimeError(f"Checkpoint run lookup failed: HTTP {response.status_code}")
-    for run in response.json()["workflow_runs"]:
+    return response.json()["workflow_runs"]
+
+
+def get_last_workflow_run(owner, repo, workflow_name):
+    """Newest successful run whose job really ran: the legacy bots' checkpoint."""
+    headers = _headers()
+    for run in _list_workflow_runs(owner, repo, workflow_name, {"status": "success", "per_page": 100}):
         if str(run["id"]) == os.environ.get("GITHUB_RUN_ID"):
             continue
         jobs = requests.get(run["jobs_url"], headers=headers, timeout=30)
@@ -64,3 +72,23 @@ def get_last_workflow_run(owner, repo, workflow_name):
         if any(job["conclusion"] == "success" for job in jobs.json()["jobs"]):
             return run
     raise RuntimeError(f"No successful checkpoint run for {workflow_name}")
+
+
+def list_executed_workflow_runs(owner, repo, workflow_name, per_page=100):
+    """Completed runs that executed the bot, newest first, without the current run.
+
+    One query per executed conclusion, so the runs a gated-off cron leaves as
+    "skipped" never dilute the page and the newest successful run is always
+    part of the result.
+    """
+    current_run_id = os.environ.get("GITHUB_RUN_ID")
+    runs = {}
+    for conclusion in EXECUTED_CONCLUSIONS:
+        params = {"status": conclusion, "per_page": per_page}
+        for run in _list_workflow_runs(owner, repo, workflow_name, params):
+            if str(run["id"]) == current_run_id:
+                continue
+            if run.get("conclusion") not in EXECUTED_CONCLUSIONS:
+                continue
+            runs[run["id"]] = run
+    return [runs[run_id] for run_id in sorted(runs, reverse=True)]

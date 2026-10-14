@@ -78,6 +78,24 @@ class FallbackHTTPProvider(HTTPProvider):
         self._endpoint_index = (self._endpoint_index + 1) % len(self._endpoints)
         self.endpoint_uri = self._endpoints[self._endpoint_index]
 
+    @property
+    def endpoint_count(self) -> int:
+        return len(self._endpoints)
+
+    def rotate(self) -> str:
+        """Move to the next endpoint and return it.
+
+        For callers whose request was answered but refused for a reason the
+        provider cannot see (e.g. an eth_getLogs block-range cap).
+        """
+        self._advance()
+        return self.endpoint_uri
+
+    def reset(self) -> None:
+        """Return to the preferred (first) endpoint."""
+        self._endpoint_index = 0
+        self.endpoint_uri = self._endpoints[0]
+
     def make_request(self, method: Any, params: Any) -> Any:
         last_error: Optional[BaseException] = None
         last_rpc_error = None

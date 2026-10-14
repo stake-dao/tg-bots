@@ -10,6 +10,16 @@ on:
         description: "Unique ID for Temporal tracking"
         required: false
         default: ""
+      reset_chains:
+        type: string
+        description: "Comma-separated chain ids restarting from the current head (their backlog is skipped)"
+        required: false
+        default: ""
+      checkpoint_overrides:
+        type: string
+        description: "Chain checkpoints to pin, as <chain id>=<first block to scan> pairs separated by commas"
+        required: false
+        default: ""
 
 concurrency:
   group: bot-curve-pools
@@ -75,4 +85,9 @@ jobs:
         shell: bash
         env:
           PYTHONPATH: script/
+          # Keep stdout and stderr interleaved so checkpoint markers and
+          # delivery errors appear in order in the run log.
+          PYTHONUNBUFFERED: "1"
           PROD: "True"
+          BOT_RESET_CHAIN_IDS: ${{ github.event.inputs.reset_chains || '' }}
+          BOT_CHECKPOINT_OVERRIDES: ${{ github.event.inputs.checkpoint_overrides || '' }}

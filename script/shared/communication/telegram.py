@@ -10,6 +10,24 @@ from shared.constants import Common, GlobalConstants
 from shared.utils.globals import is_production
 
 
+# Attempts per message when Telegram answers 429; the wait honours the
+# retry_after it returns, capped so a burst cannot stall a run.
+TELEGRAM_SEND_ATTEMPTS = 3
+MAX_RETRY_AFTER_SECONDS = 30
+
+
+def _retry_after_seconds(response) -> float:
+    try:
+        return float(response.json()["parameters"]["retry_after"])
+    except (ValueError, KeyError, TypeError, requests.exceptions.JSONDecodeError):
+        pass
+    try:
+        return float(response.headers.get("Retry-After") or 1)
+    except (ValueError, TypeError):
+        # HTTP-date form or garbage from a proxy in front of Telegram.
+        return 1.0
+
+
 def send_telegram_message(botKey, chatId, message, parse_mode="html") -> bool:
     """Send a message to the Telegram channel with specified formatting.
 
@@ -44,11 +62,20 @@ def send_telegram_message(botKey, chatId, message, parse_mode="html") -> bool:
 
     success = False
     try:
-        # Bounded: callers hold delivery leases (vote reminder in-flight
-        # lock), so a hung request must never outlive them
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
-        response.raise_for_status()
-        success = True
+        for attempt in range(TELEGRAM_SEND_ATTEMPTS):
+            # Bounded: callers hold delivery leases (vote reminder in-flight
+            # lock), so a hung request must never outlive them
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            if response.status_code == 429 and attempt < TELEGRAM_SEND_ATTEMPTS - 1:
+                delay = max(_retry_after_seconds(response), 1.0)
+                if delay <= MAX_RETRY_AFTER_SECONDS:
+                    print(f"Telegram rate limited, retrying in {delay:.0f}s")
+                    time.sleep(delay)
+                    continue
+                # A longer ban cannot be waited out here: fail this message now.
+            response.raise_for_status()
+            success = True
+            break
     except requests.exceptions.HTTPError as err:
         if err.response.status_code == 400:
             # Try to get more details about the error

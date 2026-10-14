@@ -42,9 +42,9 @@ def isolated_bot(monkeypatch, tmp_path):
         if url.endswith("/runs"):
             response.status_code = state["lookup_status"]
             response.json.return_value = {"workflow_runs": [
-                {"id": 3, "jobs_url": "https://fixture.invalid/current"},
-                {"id": 2, "jobs_url": "https://fixture.invalid/skipped"},
-                {"id": 1, "jobs_url": "https://fixture.invalid/previous"},
+                {"id": 3, "conclusion": "failure", "jobs_url": "https://fixture.invalid/current"},
+                {"id": 2, "conclusion": "skipped", "jobs_url": "https://fixture.invalid/skipped"},
+                {"id": 1, "conclusion": "success", "jobs_url": "https://fixture.invalid/previous"},
             ]}
         elif url.endswith("/skipped"):
             response.json.return_value = {"jobs": [{"conclusion": "skipped"}]}
