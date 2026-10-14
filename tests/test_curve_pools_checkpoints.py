@@ -52,46 +52,44 @@ def as_dict(blocks):
 # --- load_checkpoints (deferred reader) --------------------------------------
 
 
-def test_transition_walks_past_untrusted_legacy_runs_to_the_last_success():
-    # Real shape of the history on first deploy: a cancelled legacy run, 67
-    # failed legacy runs (markers logged before scanning), then the success.
-    runs = [run(69, "cancelled", [(1, 26189689)])]
-    runs += [run(68 - i, "failure", [(1, 26189639), (56, 127565851)]) for i in range(67)]
-    runs += [run(1, "success", [(1, 26184830), (56, 127436555), (8453, 52560174)])]
-    runs += [run(0, "success", [(1, 1), (56, 1), (8453, 1)])]
+def test_successful_last_run_gives_the_checkpoints():
+    runs = [
+        run(3, "success", [(1, 26184830), (56, 127436555), (8453, 52560174)]),
+        run(2, "success", [(1, 1), (56, 1), (8453, 1)]),
+    ]
     seen = []
 
     blocks = GithubLogService().load_checkpoints(runs, counting(seen), [1, 56, 8453])
 
     assert as_dict(blocks) == {1: 26184830, 56: 127436555, 8453: 52560174}
-    assert len(seen) == 69 and seen[-1] == 1  # stops at the first successful run
+    assert seen == [3]  # older runs are never read
 
 
-def test_newest_deferred_run_covering_every_chain_stops_the_walk():
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled", "timed_out"])
+def test_unsuccessful_last_run_restarts_every_chain_from_head(conclusion, caplog):
+    caplog.set_level(logging.INFO)
     runs = [
-        run(3, "failure", [(1, 110), (56, 500)], deferred=True),  # ETH committed, BSC retained
-        run(2, "success", [(1, 100), (56, 500)]),
+        run(3, conclusion, [(1, 110), (56, 500)], deferred=True),
+        run(2, "success", [(1, 100), (56, 400)]),
     ]
     seen = []
+    service = GithubLogService()
 
-    blocks = GithubLogService().load_checkpoints(runs, counting(seen), [1, 56])
+    blocks = service.load_checkpoints(runs, counting(seen), [1, 56])
 
-    assert as_dict(blocks) == {1: 110, 56: 500}
-    assert seen == [3]
+    assert blocks == []
+    assert seen == []  # not even the last run's logs are downloaded
+    assert f"Last run 3 ({conclusion}) did not succeed" in caplog.text
+    assert service.get_last_block_and_log(blocks, 1, FakeWeb3(1000), defer_marker=True) == (0, 998)
+    assert markers_in(caplog) == [(1, 999)]
 
 
-def test_cancelled_deferred_run_is_completed_by_older_runs():
-    runs = [
-        run(5, "cancelled", [(1, 110)], deferred=True),           # cancelled before BSC
-        run(4, "failure", [(1, 100), (56, 900)]),                  # legacy failed run: untrusted
-        run(3, "success", [(1, 90), (56, 800), (42161, 7000)]),
-    ]
-    seen = []
+def test_inputs_still_apply_after_an_unsuccessful_last_run():
+    blocks = GithubLogService().load_checkpoints(
+        [run(2, "failure", [(1, 110)], deferred=True)], fetch, [1, 56], overrides={56: 700}
+    )
 
-    blocks = GithubLogService().load_checkpoints(runs, counting(seen), [1, 56, 42161])
-
-    assert as_dict(blocks) == {1: 110, 56: 800, 42161: 7000}
-    assert seen == [5, 4, 3]
+    assert as_dict(blocks) == {56: 700}
 
 
 def test_reset_and_overrides_apply_after_recovery(caplog):
@@ -112,24 +110,10 @@ def test_inputs_covering_every_chain_skip_the_history():
         raise OSError("logs unreadable")
 
     blocks = GithubLogService().load_checkpoints(
-        [run(1, "failure", [])], unreadable, [1, 56], reset_chain_ids={56}, overrides={1: 150}
+        [run(1, "success", [])], unreadable, [1, 56], reset_chain_ids={56}, overrides={1: 150}
     )
 
     assert as_dict(blocks) == {1: 150}
-
-
-def test_expired_logs_of_untrusted_runs_are_skipped(caplog):
-    from shared.external.github import LogsUnavailable
-
-    def fetch_or_expired(r):
-        if r["id"] == 2:
-            raise LogsUnavailable("Checkpoint log download failed: HTTP 410")
-        return fetch(r)
-
-    runs = [run(2, "failure", []), run(1, "success", [(1, 100)])]
-
-    assert as_dict(GithubLogService().load_checkpoints(runs, fetch_or_expired, [1])) == {1: 100}
-    assert "Skipping run 2" in caplog.text
 
 
 def test_expired_logs_of_the_success_run_abort():
@@ -171,7 +155,7 @@ def test_log_download_failure_is_wrapped():
         raise OSError("boom")
 
     with pytest.raises(RuntimeError, match="Unable to recover checkpoint logs of run 7"):
-        GithubLogService().load_checkpoints([run(7, "failure", [])], failing_fetch, [1])
+        GithubLogService().load_checkpoints([run(7, "success", [])], failing_fetch, [1])
 
 
 def test_extract_run_markers_detects_the_deferred_sentinel(monkeypatch, tmp_path):
@@ -314,14 +298,14 @@ def test_legacy_get_block_range_reads_the_newest_successful_run_only(monkeypatch
     assert markers_in(caplog) == [(1, 199)]
 
 
-def test_deferred_get_block_range_walks_runs_and_applies_inputs(monkeypatch, caplog):
+def test_deferred_get_block_range_applies_inputs(monkeypatch, caplog):
     import bots.utils.github as github_utils
     import shared.external.github as github_api
 
     caplog.set_level(logging.INFO)
     runs = [run(2, "failure", [(1, 110), (56, 500)], deferred=True), run(1, "success", [(1, 100), (56, 400)])]
     monkeypatch.setattr(github_api, "list_executed_workflow_runs", lambda *_a, **_k: runs)
-    monkeypatch.setattr(github_api, "get_last_workflow_run", lambda *_a: pytest.fail("deferred bots walk runs"))
+    monkeypatch.setattr(github_api, "get_last_workflow_run", lambda *_a: pytest.fail("deferred bots list executed runs"))
     monkeypatch.setattr(
         github_utils.GithubLogService,
         "extract_run_markers",
