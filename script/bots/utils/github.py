@@ -6,7 +6,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from requests.exceptions import HTTPError
 
-from shared.external.github import LogsUnavailable, download_logs, extract_logs
+from shared.external.github import download_logs, extract_logs
 
 logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
 
@@ -21,9 +21,7 @@ REPO = "tg-bots"
 # chain, so a run must log it exactly once per chain.
 CHECKPOINT_PATTERN = r"Chain (\d+) / last block (\d+)"
 # Sentinel logged by runs that emit a chain's marker only once that chain was
-# fully processed (or re-emit the previous checkpoint when it failed). Legacy
-# runs log the marker before scanning, so only sentinel-bearing runs may be
-# trusted as checkpoints when they did not succeed.
+# fully processed (or re-emit the previous checkpoint when it failed).
 DEFERRED_MODE_MARKER = "Checkpoint mode: deferred"
 
 # Safety margin subtracted from `latest` block when computing the run's toBlock.
@@ -114,58 +112,46 @@ class GithubLogService:
         reset_chain_ids: Iterable[int] = (),
         overrides: Optional[Dict[int, int]] = None,
     ) -> List[Dict]:
-        """Merge checkpoint markers from executed runs, newest first (deferred mode).
+        """Checkpoint markers of the newest executed run (deferred mode).
 
-        ``fetch_markers(run)`` returns ``(markers, deferred)`` for one run. A
-        run that did not succeed is trusted only when it ran in deferred mode,
-        because legacy runs logged their markers before scanning. Per chain the
-        newest trusted marker wins. The walk stops at the first successful run,
-        which holds a marker for every chain it knew, or earlier once every
-        expected chain is covered. Chains in ``reset_chain_ids``, and chains no
-        inspected run mentions, restart from the current head; ``overrides``
-        pin a chain to an explicit block.
+        Only the newest run is read. When it succeeded, its markers are the
+        checkpoints. When it failed, was cancelled or ended any other way, its
+        markers are ignored and every chain restarts from the current head,
+        skipping the blocks produced since. Chains in ``reset_chain_ids``, and
+        chains the newest run does not mention, also restart from the current
+        head; ``overrides`` pin a chain to an explicit block.
         """
         found: Dict[int, int] = {}
         expected = set(expected_chain_ids)
         reset_chain_ids = set(reset_chain_ids)
         overrides = overrides or {}
-        if expected and expected <= reset_chain_ids | set(overrides):
-            # Every chain is given explicitly: the history is not needed, which
+        last_run = None
+        if not (expected and expected <= reset_chain_ids | set(overrides)):
+            # Every chain given explicitly: the history is not needed, which
             # also rescues a recovery wedged on unreadable logs.
-            runs = []
-        for run in runs:
-            success = run.get("conclusion") == "success"
+            last_run = next(iter(runs), None)
+        if last_run is not None and last_run.get("conclusion") != "success":
+            logging.info(
+                f"Last run {last_run.get('id')} ({last_run.get('conclusion')}) did not succeed: "
+                "every chain restarts from the current head"
+            )
+        elif last_run is not None:
             try:
-                markers, deferred = fetch_markers(run)
-            except LogsUnavailable as e:
-                if success:
-                    raise RuntimeError(
-                        f"Unable to recover checkpoint logs of run {run.get('id')}"
-                    ) from e
-                logging.warning(f"Skipping run {run.get('id')}: {e}")
-                continue
+                markers, _ = fetch_markers(last_run)
             except Exception as e:
                 raise RuntimeError(
-                    f"Unable to recover checkpoint logs of run {run.get('id')}"
+                    f"Unable to recover checkpoint logs of run {last_run.get('id')}"
                 ) from e
-            if success and not markers:
+            if not markers:
                 raise RuntimeError(
-                    f"Checkpoint logs of successful run {run.get('id')} contain no block markers"
+                    f"Checkpoint logs of successful run {last_run.get('id')} contain no block markers"
                 )
-            if not success and not deferred:
-                logging.info(
-                    f"Ignoring markers of run {run.get('id')} "
-                    f"({run.get('conclusion')}): logged before processing"
-                )
-                continue
             for marker in markers:
                 found.setdefault(marker["chain_id"], marker["last_block"])
             logging.info(
-                f"Checkpoint run {run.get('id')} ({run.get('conclusion')}) "
-                f"covers chains {sorted({m['chain_id'] for m in markers})}"
+                f"Checkpoint run {last_run.get('id')} (success) "
+                f"covers chains {sorted(found)}"
             )
-            if success or expected <= set(found):
-                break
 
         for chain_id in reset_chain_ids:
             if found.pop(chain_id, None) is not None:

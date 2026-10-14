@@ -63,8 +63,9 @@ def get_block_range(
 
     Without ``defer_commit`` the checkpoint is the newest successful run's
     markers and the marker for the next run is logged right away. With it,
-    markers are merged across the newest executed runs (see
-    ``GithubLogService.load_checkpoints``) and the caller must end each chain
+    markers come from the newest executed run only, and every chain restarts
+    from the head when that run did not succeed (see
+    ``GithubLogService.load_checkpoints``). The caller must end each chain
     with :func:`commit_block_range`, so a chain whose processing fails keeps
     its previous checkpoint; ``expected_chain_ids``, ``reset_chain_ids`` and
     ``checkpoint_overrides`` are consumed by that first recovery. Pass the same
