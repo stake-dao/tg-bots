@@ -40,7 +40,9 @@ Workflows supply `GITHUB_TOKEN` automatically with `actions: read` and `contents
 
 ## State and execution
 
-Log-backed bots recover block checkpoints from the latest successful executed workflow run. Keep workflow filenames stable and retain checkpoint-bearing Actions logs. Missing logs or checkpoint markers abort recovery.
+Log-backed bots recover block checkpoints from previous workflow runs. Most bots log a chain's `Chain <id> / last block <n>` marker before scanning and read it back from the latest successful run. `curve-pools` logs the marker once the chain's notifications went out (its runs carry `Checkpoint mode: deferred`), re-emits the previous checkpoint when that chain fails, caps each chain's window per run and scans BSC last; it reads markers back from the newest executed runs down to the latest successful one, so its failed or cancelled runs are valid checkpoints and one failing chain never makes the others replay. Keep workflow filenames stable and retain checkpoint-bearing Actions logs. Missing logs or checkpoint markers abort recovery.
+
+Two `curve-pools.yml` dispatch inputs adjust the recovered checkpoints: `reset_chains` (comma-separated chain ids) restarts those chains from the current head and skips their backlog; `checkpoint_overrides` (`<chain id>=<first block to scan>` pairs, comma-separated) resumes a chain from an exact block.
 
 OnlyBoost stores checkpoints and event deduplication in `tg-bot:onlyboost-v2:*` Redis keys. Incentives stores seen IDs and gauge caches in `tg-bot:votemarket-incentives:*`; IDs are marked seen after confirmed Telegram delivery.
 

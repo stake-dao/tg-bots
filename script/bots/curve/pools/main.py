@@ -1,7 +1,11 @@
 import logging
+import os
+import signal
+import time
+from collections import Counter
 
 import requests
-from shared.bot_runner import get_block_range
+from shared.bot_runner import commit_block_range, get_block_range, retain_uncommitted_ranges
 from dotenv import load_dotenv
 from shared.address import format_eth_address
 from shared.communication.telegram import send_telegram_message
@@ -16,6 +20,7 @@ from shared.constants import (
 from shared.external.explorer import get_explorer_link
 from shared.protocols.lockers import load_lockers
 from shared.strings import abbreviate_number
+from shared.utils.event_logs import fetch_event_logs
 from shared.utils.globals import load_json
 from web3 import Web3
 from shared.services.web3_service import get_web3_service
@@ -84,6 +89,32 @@ BLOCKCHAIN_IDS = {
     10: "op",
 }
 
+# Chains scanned by the job, slowest RPC last so that a slow BSC catch-up
+# cannot starve the others of the 20-minute job timeout.
+CHAIN_SCAN_ORDER = [1, 42161, 8453, 10, 252, 324, 56]
+assert set(CHAIN_SCAN_ORDER) == set(BLOCKCHAIN_IDS)
+
+# Largest block window scanned per run and chain; the remainder is left to the
+# next run, so a long outage is caught up over several runs instead of one
+# request burst that trips provider limits or the job timeout.
+MAX_BLOCKS_PER_RUN = {
+    1: 5000,
+    56: 10000,
+    42161: 100000,
+}
+DEFAULT_MAX_BLOCKS_PER_RUN = 50000
+
+# Chains not started after this many seconds keep their checkpoint for the
+# next run, leaving headroom before the workflow's 20-minute timeout.
+RUN_BUDGET_SECONDS = 15 * 60
+
+# Telegram deliveries that failed during the run, per chain.
+failed_sends = Counter()
+
+# Dispatch inputs adjusting the recovered checkpoints (see curve-pools.yml).
+RESET_CHAIN_IDS_ENV = "BOT_RESET_CHAIN_IDS"
+CHECKPOINT_OVERRIDES_ENV = "BOT_CHECKPOINT_OVERRIDES"
+
 EVENT_TYPES = {
     "TOKEN_EXCHANGE": 0,
     "ADD_LIQUIDITY": 1,
@@ -105,19 +136,17 @@ def send_telegram_message_curve(message, chainId=1, parse_mode="html"):
     print(message)
     print("=" * 80)
     """
-    send_telegram_message(
-         GlobalConstants.BOT_API_KEY,
-         GlobalConstants.TELEGRAM_ACTIVITY_CHANNEL_ID,
-         message,
-         parse_mode,
-     )
+    channels = [GlobalConstants.TELEGRAM_ACTIVITY_CHANNEL_ID]
     if chainId == 56:
-         send_telegram_message(
-             GlobalConstants.BOT_API_KEY,
-             GlobalConstants.TELEGRAM_PUBLIC_CHINOIS_CHANNEL_ID,
-             message,
-             parse_mode,
-         )
+        channels.append(GlobalConstants.TELEGRAM_PUBLIC_CHINOIS_CHANNEL_ID)
+    for channel in channels:
+        if not send_telegram_message(
+            GlobalConstants.BOT_API_KEY,
+            channel,
+            message,
+            parse_mode,
+        ):
+            failed_sends[chainId] += 1
 
 
 def getPool(poolAddress, allPools, blockchainId):
@@ -973,265 +1002,406 @@ def get_pools_from_api():
         return load_json("bots/allPools")
 
 
+def collect_chain_events(web3, chainId, from_block, current_block):
+    """Fetch the pool, depositor and mint events of a chain over the block window."""
+    allEvents = []
+
+    if chainId in POOLS_PER_CHAIN:
+        pools = POOLS_PER_CHAIN[chainId]
+        for poolAddress in pools:
+            if chainId == 56:
+                if ContractRegistry.sdCAKE_CAKE_V3[56].lower() == poolAddress.lower():
+                    # Create pool contract
+                    poolContract = web3.eth.contract(
+                        address=Web3.to_checksum_address(poolAddress),
+                        abi=pancakeV3PoolABI,
+                    )
+
+                    # Fetch all events
+                    tokenEchanges = fetch_event_logs(
+                        poolContract.events.Swap(), from_block, current_block, chainId
+                    )
+                    for event in tokenEchanges:
+                        allEvents.append(
+                            copyEvent(event, EVENT_TYPES["SWAP_V3"])
+                        )
+                if ContractRegistry.sdCAKE_CAKE_STABLE[56].lower() == poolAddress.lower():
+                    # Create pool contract
+                    poolContract = web3.eth.contract(
+                        address=Web3.to_checksum_address(poolAddress),
+                        abi=stableCakePoolABI,
+                    )
+
+                    # Fetch all events
+                    tokenEchanges = fetch_event_logs(
+                        poolContract.events.TokenExchange(),
+                        from_block,
+                        current_block,
+                        chainId,
+                    )
+                    for event in tokenEchanges:
+                        allEvents.append(
+                            copyEvent(event, EVENT_TYPES["SWAP_STABLE"])
+                        )
+
+                    addLiquidity = fetch_event_logs(
+                        poolContract.events.AddLiquidity(),
+                        from_block,
+                        current_block,
+                        chainId,
+                    )
+                    for event in addLiquidity:
+                        allEvents.append(
+                            copyEvent(
+                                event, EVENT_TYPES["ADD_LIQUIDITY_STABLE"]
+                            )
+                        )
+                # The Pancake pools are not Curve pools: the generic Curve scan
+                # below cannot match them in the Curve pool list, so its eight
+                # queries per pool would only cost BSC RPC budget.
+                continue
+
+            if poolAddress.lower() == ContractRegistry.sdBAL_POOL[1].lower():
+                # https://etherscan.io/tx/0x3719c9d688bfc9c665341c39e1ce7608b4cfd8de8c51c717fcb68f206cbdea14#eventlog
+                continue
+            else:
+                for abi in [curveStableSwapNGABI, curveStableSwapABI]:
+                    # Create pool contract
+                    poolContract = web3.eth.contract(
+                        address=Web3.to_checksum_address(poolAddress),
+                        abi=abi,
+                    )
+
+                    # Fetch all events
+                    tokenEchanges = fetch_event_logs(
+                        poolContract.events.TokenExchange(),
+                        from_block,
+                        current_block,
+                        chainId,
+                    )
+                    for event in tokenEchanges:
+                        allEvents.append(
+                            copyEvent(event, EVENT_TYPES["TOKEN_EXCHANGE"])
+                        )
+
+                    addLiquidities = fetch_event_logs(
+                        poolContract.events.AddLiquidity(),
+                        from_block,
+                        current_block,
+                        chainId,
+                    )
+                    for event in addLiquidities:
+                        allEvents.append(
+                            copyEvent(event, EVENT_TYPES["ADD_LIQUIDITY"])
+                        )
+
+                    removeLiquidities = fetch_event_logs(
+                        poolContract.events.RemoveLiquidity(),
+                        from_block,
+                        current_block,
+                        chainId,
+                    )
+                    for event in removeLiquidities:
+                        allEvents.append(
+                            copyEvent(
+                                event, EVENT_TYPES["REMOVE_LIQUIDITY"]
+                            )
+                        )
+
+                    removeLiquiditiesOne = fetch_event_logs(
+                        poolContract.events.RemoveLiquidityOne(),
+                        from_block,
+                        current_block,
+                        chainId,
+                    )
+                    for event in removeLiquiditiesOne:
+                        allEvents.append(
+                            copyEvent(
+                                event,
+                                EVENT_TYPES["REMOVE_LIQUIDITY_ONE_COIN"],
+                            )
+                        )
+
+    if chainId in Common.DEPOSITORS:
+        depositors = Common.DEPOSITORS[chainId]
+        for depositor in depositors:
+            if chainId == 56 or chainId == 252:
+                abi = cakeDepositorABI
+            else:
+                abi = depositorABI
+            depositorContract = web3.eth.contract(
+                address=Web3.to_checksum_address(depositor),
+                abi=abi,
+            )
+            deposits = fetch_event_logs(
+                depositorContract.events.Deposited(),
+                from_block,
+                current_block,
+                chainId,
+            )
+            for event in deposits:
+                allEvents.append(
+                    copyEvent(event, EVENT_TYPES["DEPOSITED"])
+                )
+
+    # Fetch mints from transfer
+    if chainId in Common.DEPOSITORS_TRANSFER:
+        depositorsTransfers = Common.DEPOSITORS_TRANSFER[chainId]
+        for depositorsTransfer in depositorsTransfers:
+            tokenContract = web3.eth.contract(
+                address=Web3.to_checksum_address(
+                    depositorsTransfer["token"]
+                ),
+                abi=erc20ABI,
+            )
+            deposits = fetch_event_logs(
+                tokenContract.events.Transfer(),
+                from_block,
+                current_block,
+                chainId,
+                argument_filters={
+                    "from": Web3.to_checksum_address(ZERO_ADDRESS)
+                },
+            )
+
+            for event in deposits:
+                allEvents.append(
+                    copyEvent(event, EVENT_TYPES["DEPOSITED_V2"])
+                )
+
+    return allEvents
+
+
+def dedupe_and_sort_events(allEvents):
+    # Remove same event
+    eventsMap = {}
+    for event in allEvents:
+        hash = Web3.to_hex(event["transactionHash"])
+        if hash not in eventsMap:
+            eventsMap[hash] = {}
+
+        logIndex = str(event["logIndex"])
+        if logIndex not in eventsMap[hash]:
+            eventsMap[hash][logIndex] = event
+
+    allEvents = []
+    for hash in eventsMap:
+        for logIndex in eventsMap[hash]:
+            allEvents.append(eventsMap[hash][logIndex])
+
+    # Sort event by block number
+    allEvents.sort(key=lambda x: x["blockNumber"])
+    return allEvents
+
+
+def dispatch_chain_events(web3, chainId, allEvents, lockersApi):
+    blockchainId = BLOCKCHAIN_IDS[chainId]
+
+    # Manage events
+    allPools = get_pools_from_api()
+    for event in allEvents:
+        if event["type"] == EVENT_TYPES["TOKEN_EXCHANGE"]:
+            manageTokenEchange(
+                web3,
+                event["address"],
+                event,
+                allPools,
+                blockchainId,
+                chainId,
+            )
+        elif event["type"] == EVENT_TYPES["ADD_LIQUIDITY"]:
+            manageAddLiquidity(
+                web3,
+                event["address"],
+                event,
+                allPools,
+                blockchainId,
+                chainId,
+            )
+        elif event["type"] == EVENT_TYPES["REMOVE_LIQUIDITY"]:
+            manageRemoveLiquidity(
+                web3,
+                event["address"],
+                event,
+                allPools,
+                blockchainId,
+                chainId,
+            )
+        elif event["type"] == EVENT_TYPES["REMOVE_LIQUIDITY_ONE_COIN"]:
+            manageRemoveLiquidityOneCoin(
+                web3,
+                event["address"],
+                event,
+                allPools,
+                blockchainId,
+                chainId,
+            )
+        elif event["type"] == EVENT_TYPES["SWAP_V3"]:
+            manageSwapV3(web3, event["address"], event, chainId)
+        elif event["type"] == EVENT_TYPES["SWAP_STABLE"]:
+            manageSwapStable(web3, event["address"], event, chainId)
+        elif event["type"] == EVENT_TYPES["DEPOSITED"]:
+            manageDeposit(web3, event, chainId, lockersApi)
+        elif event["type"] == EVENT_TYPES["DEPOSITED_V2"]:
+            manageDepositWithTransfer(web3, event, chainId, lockersApi)
+        elif event["type"] == EVENT_TYPES["ADD_LIQUIDITY_STABLE"]:
+            manageAddLiquidityStable(
+                web3, event["address"], event, chainId
+            )
+
+
+def process_chain(web3, chainId, from_block, current_block, lockersApi):
+    """Scan one chain's block window and send every notification it contains."""
+    allEvents = dedupe_and_sort_events(
+        collect_chain_events(web3, chainId, from_block, current_block)
+    )
+    # The scan may have rotated to a public endpoint able to serve wide
+    # eth_getLogs windows; historical calls made by the handlers belong on
+    # the preferred one.
+    reset = getattr(web3.provider, "reset", None)
+    if reset is not None:
+        reset()
+    dispatch_chain_events(web3, chainId, allEvents, lockersApi)
+
+
+def parse_chain_ids(raw):
+    """Scanned chain ids from a comma-separated string; anything else fails loudly."""
+    chain_ids = set()
+    for part in raw.split(","):
+        if not part.strip():
+            continue
+        try:
+            chain_id = int(part)
+        except ValueError as e:
+            raise ValueError(f"Invalid chain id {part.strip()!r}: expected an integer") from e
+        if chain_id not in BLOCKCHAIN_IDS:
+            raise ValueError(f"Invalid chain id {chain_id}: not scanned by this bot")
+        chain_ids.add(chain_id)
+    return chain_ids
+
+
+def parse_checkpoint_overrides(raw):
+    """``{chain_id: block}`` from ``<chain id>=<block>`` pairs separated by commas."""
+    overrides = {}
+    for part in raw.split(","):
+        if not part.strip():
+            continue
+        try:
+            chain_id, block = (int(value) for value in part.split("="))
+        except ValueError as e:
+            raise ValueError(
+                f"Invalid checkpoint override {part.strip()!r}: expected <chain id>=<block>"
+            ) from e
+        if chain_id not in BLOCKCHAIN_IDS:
+            raise ValueError(f"Invalid checkpoint override {part.strip()!r}: chain not scanned by this bot")
+        if block < 1:
+            raise ValueError(f"Invalid checkpoint override {part.strip()!r}: block must be positive")
+        if chain_id in overrides:
+            raise ValueError(f"Invalid checkpoint override {part.strip()!r}: chain {chain_id} given twice")
+        overrides[chain_id] = block
+    return overrides
+
+
+def _error_summary(error):
+    text = str(error).strip()
+    return text.splitlines()[0] if text else type(error).__name__
+
+
+def _report_failed_sends(chainId):
+    if failed_sends[chainId]:
+        print(
+            f"::warning title=curve-pools chain {chainId}::"
+            f"{failed_sends[chainId]} Telegram message(s) could not be delivered"
+        )
+
+
 def job():
+    started = time.monotonic()
+    # Validate the dispatch inputs before any GitHub or RPC call.
+    reset_chain_ids = parse_chain_ids(os.environ.get(RESET_CHAIN_IDS_ENV, ""))
+    checkpoint_overrides = parse_checkpoint_overrides(
+        os.environ.get(CHECKPOINT_OVERRIDES_ENV, "")
+    )
+    overlap = reset_chain_ids & set(checkpoint_overrides)
+    if overlap:
+        raise ValueError(f"Chains {sorted(overlap)} are both reset and overridden")
+
     # config = loadConfigFromFile()
     lockersApi = load_lockers()
 
     checkpoints = {}
+    failures = {}
 
     web3_service = get_web3_service()
-    for chainId in GlobalConstants.CHAIN_ID_TO_PUBLIC_RPC:
-        if chainId not in BLOCKCHAIN_IDS:
-            continue
-        web3_service.add_chain(chainId)
-        allEvents = []
+    try:
+        for chainId in CHAIN_SCAN_ORDER:
+            # Only once checkpoints are loaded: a run must log a marker per chain.
+            if WORKFLOW_NAME in checkpoints and time.monotonic() - started > RUN_BUDGET_SECONDS:
+                logging.warning(
+                    f"Run budget of {RUN_BUDGET_SECONDS}s spent, chain {chainId} "
+                    "and the next ones keep their checkpoint"
+                )
+                break
+            # One chain must not take the others down: its checkpoint is
+            # committed only once its notifications went out, and a failure
+            # re-emits the previous checkpoint so the next run retries that
+            # window alone.
+            try:
+                web3_service.add_chain(chainId)
+                web3 = web3_service.get_w3(chainId)
 
-        web3 = web3_service.get_w3(chainId)
+                # Get the last block fetched
+                from_block, current_block = get_block_range(
+                    WORKFLOW_NAME,
+                    chainId,
+                    web3,
+                    checkpoints,
+                    defer_commit=True,
+                    max_blocks=MAX_BLOCKS_PER_RUN.get(chainId, DEFAULT_MAX_BLOCKS_PER_RUN),
+                    expected_chain_ids=CHAIN_SCAN_ORDER,
+                    reset_chain_ids=reset_chain_ids,
+                    checkpoint_overrides=checkpoint_overrides,
+                )
 
-        # Get the last block fetched
-        from_block, current_block = get_block_range(WORKFLOW_NAME, chainId, web3, checkpoints)
-
-        if from_block == 0:
-            continue
-
-        blockchainId = BLOCKCHAIN_IDS[chainId]
-
-        if chainId in POOLS_PER_CHAIN:
-            pools = POOLS_PER_CHAIN[chainId]
-            for poolAddress in pools:
-                if chainId == 56:
-                    if ContractRegistry.sdCAKE_CAKE_V3[56].lower() == poolAddress.lower():
-                        # Create pool contract
-                        poolContract = web3.eth.contract(
-                            address=Web3.to_checksum_address(poolAddress),
-                            abi=pancakeV3PoolABI,
-                        )
-
-                        # Fetch all events
-                        tokenEchanges = poolContract.events.Swap().get_logs(
-                            from_block=from_block, to_block=current_block
-                        )
-                        for event in tokenEchanges:
-                            allEvents.append(
-                                copyEvent(event, EVENT_TYPES["SWAP_V3"])
-                            )
-                    if ContractRegistry.sdCAKE_CAKE_STABLE[56].lower() == poolAddress.lower():
-                        # Create pool contract
-                        poolContract = web3.eth.contract(
-                            address=Web3.to_checksum_address(poolAddress),
-                            abi=stableCakePoolABI,
-                        )
-
-                        # Fetch all events
-                        tokenEchanges = (
-                            poolContract.events.TokenExchange().get_logs(
-                                from_block=from_block,
-                                to_block=current_block,
-                            )
-                        )
-                        for event in tokenEchanges:
-                            allEvents.append(
-                                copyEvent(event, EVENT_TYPES["SWAP_STABLE"])
-                            )
-
-                        addLiquidity = (
-                            poolContract.events.AddLiquidity().get_logs(
-                                from_block=from_block,
-                                to_block=current_block,
-                            )
-                        )
-                        for event in addLiquidity:
-                            allEvents.append(
-                                copyEvent(
-                                    event, EVENT_TYPES["ADD_LIQUIDITY_STABLE"]
-                                )
-                            )
-
-                if poolAddress.lower() == ContractRegistry.sdBAL_POOL[1].lower():
-                    # https://etherscan.io/tx/0x3719c9d688bfc9c665341c39e1ce7608b4cfd8de8c51c717fcb68f206cbdea14#eventlog
+                if from_block == 0:
                     continue
-                else:
-                    for abi in [curveStableSwapNGABI, curveStableSwapABI]:
-                        # Create pool contract
-                        poolContract = web3.eth.contract(
-                            address=Web3.to_checksum_address(poolAddress),
-                            abi=abi,
-                        )
 
-                        # Fetch all events
-                        tokenEchanges = (
-                            poolContract.events.TokenExchange().get_logs(
-                                from_block=from_block,
-                                to_block=current_block,
-                            )
-                        )
-                        for event in tokenEchanges:
-                            allEvents.append(
-                                copyEvent(event, EVENT_TYPES["TOKEN_EXCHANGE"])
-                            )
+                process_chain(web3, chainId, from_block, current_block, lockersApi)
+            except Exception as e:
+                if WORKFLOW_NAME not in checkpoints:
+                    # No checkpoint could be recovered at all: nothing can be scanned.
+                    raise
+                failures[chainId] = e
+                logging.exception(f"Chain {chainId} failed, keeping its checkpoint")
+                print(f"::error title=curve-pools chain {chainId}::{_error_summary(e)}")
+                commit_block_range(WORKFLOW_NAME, chainId, checkpoints, processed=False)
+                continue
+            finally:
+                _report_failed_sends(chainId)
 
-                        addLiquidities = (
-                            poolContract.events.AddLiquidity().get_logs(
-                                from_block=from_block,
-                                to_block=current_block,
-                            )
-                        )
-                        for event in addLiquidities:
-                            allEvents.append(
-                                copyEvent(event, EVENT_TYPES["ADD_LIQUIDITY"])
-                            )
+            commit_block_range(WORKFLOW_NAME, chainId, checkpoints)
+    finally:
+        # Cancelled, timed out or out of budget: every chain not committed yet
+        # re-emits its checkpoint so the next run neither replays the others
+        # nor forgets these.
+        if WORKFLOW_NAME in checkpoints:
+            retain_uncommitted_ranges(WORKFLOW_NAME, CHAIN_SCAN_ORDER, checkpoints)
 
-                        removeLiquidities = (
-                            poolContract.events.RemoveLiquidity().get_logs(
-                                from_block=from_block,
-                                to_block=current_block,
-                            )
-                        )
-                        for event in removeLiquidities:
-                            allEvents.append(
-                                copyEvent(
-                                    event, EVENT_TYPES["REMOVE_LIQUIDITY"]
-                                )
-                            )
+    if failures:
+        raise RuntimeError(
+            "Chains failed: "
+            + ", ".join(f"{chainId}: {_error_summary(e)}" for chainId, e in failures.items())
+        )
 
-                        removeLiquiditiesOne = (
-                            poolContract.events.RemoveLiquidityOne().get_logs(
-                                from_block=from_block,
-                                to_block=current_block,
-                            )
-                        )
-                        for event in removeLiquiditiesOne:
-                            allEvents.append(
-                                copyEvent(
-                                    event,
-                                    EVENT_TYPES["REMOVE_LIQUIDITY_ONE_COIN"],
-                                )
-                            )
 
-        if chainId in Common.DEPOSITORS:
-            depositors = Common.DEPOSITORS[chainId]
-            for depositor in depositors:
-                if chainId == 56 or chainId == 252:
-                    depositorContract = web3.eth.contract(
-                        address=Web3.to_checksum_address(depositor),
-                        abi=cakeDepositorABI,
-                    )
-                    deposits = depositorContract.events.Deposited().get_logs(
-                        from_block=from_block, to_block=current_block
-                    )
-                    for event in deposits:
-                        allEvents.append(
-                            copyEvent(event, EVENT_TYPES["DEPOSITED"])
-                        )
-                else:
-                    depositorContract = web3.eth.contract(
-                        address=Web3.to_checksum_address(depositor),
-                        abi=depositorABI,
-                    )
-                    deposits = depositorContract.events.Deposited().get_logs(
-                        from_block=from_block, to_block=current_block
-                    )
-                    for event in deposits:
-                        allEvents.append(
-                            copyEvent(event, EVENT_TYPES["DEPOSITED"])
-                        )
-
-        # Fetch mints from transfer
-        if chainId in Common.DEPOSITORS_TRANSFER:
-            depositorsTransfers = Common.DEPOSITORS_TRANSFER[chainId]
-            for depositorsTransfer in depositorsTransfers:
-                tokenContract = web3.eth.contract(
-                    address=Web3.to_checksum_address(
-                        depositorsTransfer["token"]
-                    ),
-                    abi=erc20ABI,
-                )
-                deposits = tokenContract.events.Transfer().get_logs(
-                    from_block=from_block,
-                    to_block=current_block,
-                    argument_filters={
-                        "from": Web3.to_checksum_address(ZERO_ADDRESS)
-                    },
-                )
-
-                for event in deposits:
-                    allEvents.append(
-                        copyEvent(event, EVENT_TYPES["DEPOSITED_V2"])
-                    )
-
-        # Remove same event
-        eventsMap = {}
-        for event in allEvents:
-            hash = Web3.to_hex(event["transactionHash"])
-            if hash not in eventsMap:
-                eventsMap[hash] = {}
-
-            logIndex = str(event["logIndex"])
-            if logIndex not in eventsMap[hash]:
-                eventsMap[hash][logIndex] = event
-
-        allEvents = []
-        for hash in eventsMap:
-            for logIndex in eventsMap[hash]:
-                allEvents.append(eventsMap[hash][logIndex])
-
-        # Sort event by block number
-        allEvents.sort(key=lambda x: x["blockNumber"])
-
-        # Manage events
-        allPools = get_pools_from_api()
-        for event in allEvents:
-            if event["type"] == EVENT_TYPES["TOKEN_EXCHANGE"]:
-                manageTokenEchange(
-                    web3,
-                    event["address"],
-                    event,
-                    allPools,
-                    blockchainId,
-                    chainId,
-                )
-            elif event["type"] == EVENT_TYPES["ADD_LIQUIDITY"]:
-                manageAddLiquidity(
-                    web3,
-                    event["address"],
-                    event,
-                    allPools,
-                    blockchainId,
-                    chainId,
-                )
-            elif event["type"] == EVENT_TYPES["REMOVE_LIQUIDITY"]:
-                manageRemoveLiquidity(
-                    web3,
-                    event["address"],
-                    event,
-                    allPools,
-                    blockchainId,
-                    chainId,
-                )
-            elif event["type"] == EVENT_TYPES["REMOVE_LIQUIDITY_ONE_COIN"]:
-                manageRemoveLiquidityOneCoin(
-                    web3,
-                    event["address"],
-                    event,
-                    allPools,
-                    blockchainId,
-                    chainId,
-                )
-            elif event["type"] == EVENT_TYPES["SWAP_V3"]:
-                manageSwapV3(web3, event["address"], event, chainId)
-            elif event["type"] == EVENT_TYPES["SWAP_STABLE"]:
-                manageSwapStable(web3, event["address"], event, chainId)
-            elif event["type"] == EVENT_TYPES["DEPOSITED"]:
-                manageDeposit(web3, event, chainId, lockersApi)
-            elif event["type"] == EVENT_TYPES["DEPOSITED_V2"]:
-                manageDepositWithTransfer(web3, event, chainId, lockersApi)
-            elif event["type"] == EVENT_TYPES["ADD_LIQUIDITY_STABLE"]:
-                manageAddLiquidityStable(
-                    web3, event["address"], event, chainId
-                )
+def _interrupt(signum, _frame):
+    raise KeyboardInterrupt(f"Received signal {signum}")
 
 
 def main():
+    # GitHub cancels with SIGINT then SIGTERM; both must unwind through job()'s
+    # finally so the checkpoints of unprocessed chains are kept.
+    signal.signal(signal.SIGTERM, _interrupt)
     try:
         job()
     except Exception as e:
