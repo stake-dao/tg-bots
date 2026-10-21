@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from shared.communication.telegram import send_telegram_message
 from shared.constants import ContractRegistry, GlobalConstants
 from shared.external.explorer import CHAIN_NAMES, L2_CHAIN_IDS
+from shared.services.stakedao_api import API_BASE_URL, parse_protocols, validate_collection
 from shared.services.data_hub_service import fetch_gauge_tvls as _fetch_gauge_tvls
 from shared.utils.formatters import format_amount
 from shared.utils.globals import get_redis_client, get_token_price, replace_double_quotes_with_single
@@ -17,11 +18,12 @@ logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
 
 # Configuration
 REDIS_KEY_SEEN = "tg-bot:votemarket-incentives:seen_ids"
-REDIS_KEY_GAUGES = "tg-bot:votemarket-incentives:gauge_names"
+REDIS_KEY_GAUGES = "tg-bot:votemarket-incentives:gauge_names:hub-v1-active"
+REDIS_KEY_GAUGES_STALE = REDIS_KEY_GAUGES + ":last-complete"
 REDIS_KEY_TVL = "tg-bot:votemarket-incentives:gauge_tvls"
 INCENTIVES_URL = "https://raw.githubusercontent.com/stake-dao/merkl-toolkit/refs/heads/main/data/incentives.json"
-VOTEMARKET_API_BASE = "https://votemarket-api.contact-69d.workers.dev"
-PROTOCOLS = ["curve", "balancer", "fxn", "pendle", "yb"]
+VOTEMARKET_API_BASE = API_BASE_URL
+ACTIVE_PROTOCOLS = frozenset(("curve", "fxn", "yb"))
 ONE_YEAR_SECONDS = 31536000
 SECONDS_PER_DAY = 86400
 
@@ -58,75 +60,64 @@ def save_seen_ids(seen_ids: set):
 
 
 def fetch_gauge_data() -> dict:
-    """Fetch gauge names and protocols from VoteMarket API.
-
-    Returns dict mapping gauge address (lowercase) -> {"name": str, "protocol": str}
-    """
+    """Load gauges for active notification markets without querying retired readers."""
+    response = requests.get(f"{VOTEMARKET_API_BASE}/protocols", timeout=30)
+    response.raise_for_status()
+    protocols = parse_protocols(response.json())
     gauge_map = {}
-
-    for protocol in PROTOCOLS:
-        try:
-            url = f"{VOTEMARKET_API_BASE}/{protocol}/gauges"
-            response = requests.get(url, timeout=30)
-            if response.status_code == 200:
-                data = response.json()
-                gauges = data.get("gauges", [])
-                for g in gauges:
-                    addr = g.get("gauge", "").lower()
-                    name = g.get("name", "")
-                    if addr and name:
-                        gauge_map[addr] = {"name": name, "protocol": protocol}
-                logging.info(f"Loaded {len(gauges)} gauges from {protocol}")
-        except Exception as e:
-            logging.warning(f"Failed to fetch gauges for {protocol}: {e}")
-
+    for protocol in protocols:
+        if (
+            protocol["id"] not in ACTIVE_PROTOCOLS
+            or protocol["status"] != "active"
+            or not protocol["capabilities"]["gauges"]
+        ):
+            continue
+        response = requests.get(f"{VOTEMARKET_API_BASE}/{protocol['id']}/gauges", timeout=30)
+        response.raise_for_status()
+        gauges = validate_collection(response.json(), "gauges")["gauges"]
+        if protocol["status"] == "active" and not gauges:
+            raise ValueError(f"Empty active gauge catalog: {protocol['id']}")
+        for gauge in gauges:
+            address = gauge.get("gauge")
+            if not isinstance(address, str) or not address:
+                raise ValueError("Missing gauge identity")
+            gauge_map[address.lower()] = {"name": gauge.get("name") or "", "protocol": protocol["id"]}
+    if not gauge_map:
+        raise ValueError("Empty gauge catalog")
     return gauge_map
 
 
 def load_gauge_data() -> dict:
-    """Load gauge data from Redis cache, refresh if empty"""
+    """Cache only complete catalogs; a stale identity remains safer than a guessed one."""
+    redis_client = get_redis_client()
+    cached = redis_client.get(REDIS_KEY_GAUGES)
+    if cached:
+        return json.loads(cached)
     try:
-        redis_client = get_redis_client()
-        data = redis_client.get(REDIS_KEY_GAUGES)
-        if data:
-            return json.loads(data)
-    except Exception as e:
-        logging.error(f"Error loading gauge data from Redis: {e}")
-
-    # Cache miss - fetch from API
-    gauge_map = fetch_gauge_data()
-    if gauge_map:
-        try:
-            redis_client = get_redis_client()
-            # Cache for 24 hours
-            redis_client.setex(REDIS_KEY_GAUGES, 86400, json.dumps(gauge_map))
-            logging.info(f"Cached {len(gauge_map)} gauge entries")
-        except Exception as e:
-            logging.error(f"Error caching gauge data: {e}")
-
+        gauge_map = fetch_gauge_data()
+    except Exception:
+        stale = redis_client.get(REDIS_KEY_GAUGES_STALE)
+        if not stale:
+            raise
+        logging.warning("Hub unavailable; using the last complete gauge catalog")
+        return json.loads(stale)
+    payload = json.dumps(gauge_map)
+    redis_client.set(REDIS_KEY_GAUGES_STALE, payload)
+    redis_client.setex(REDIS_KEY_GAUGES, 86400, payload)
     return gauge_map
 
 
 def get_gauge_info(gauge_address: str, gauge_map: dict) -> tuple[str, str]:
-    """Get gauge name and protocol from map.
-
-    Returns (name, protocol) tuple. Falls back to abbreviated address and 'curve'.
-    """
     data = gauge_map.get(gauge_address.lower())
-    if data and isinstance(data, dict):
-        return data.get("name", ""), data.get("protocol", "curve")
-    # Handle legacy format (just name string)
-    if data and isinstance(data, str):
-        return data, "curve"
-    return "", "curve"
+    if not isinstance(data, dict) or not isinstance(data.get("protocol"), str):
+        raise ValueError(f"Unknown gauge identity: {gauge_address}; notification deferred")
+    return data.get("name", ""), data["protocol"]
 
 
 # Protocol display names for links
 PROTOCOL_LABELS = {
     "curve": "Curve",
-    "balancer": "Balancer",
     "fxn": "F(x)",
-    "pendle": "Pendle",
     "yb": "YieldBasis",
 }
 
@@ -232,7 +223,12 @@ def format_tvl(tvl: float) -> str:
 
 
 def send_incentive_notification(incentive, gauge_map: dict, tvl_map: dict):
-    """Send Telegram notification for a new incentive"""
+    """Send Telegram notification for an incentive on an active market."""
+    gauge = incentive.get("gauge", "")
+    gauge_name, protocol = get_gauge_info(gauge, gauge_map)
+    if protocol not in ACTIVE_PROTOCOLS:
+        return False
+
     chain_id = int(incentive.get("fromChainId", 1))
     # Always use etherscan for links since rewards are distributed on mainnet
     explorer = "https://etherscan.io"
@@ -275,8 +271,7 @@ def send_incentive_notification(incentive, gauge_map: dict, tvl_map: dict):
     # Determine source type and chain label
     source_label, source_emoji, chain_name = get_source_type(chain_id, sender)
 
-    # Get gauge name and protocol
-    gauge_name, protocol = get_gauge_info(gauge, gauge_map)
+    # The gauge identity was validated before any price lookup.
     if not gauge_name:
         gauge_name = gauge[:10] + "..." + gauge[-6:]  # Abbreviated address
     protocol_label = PROTOCOL_LABELS.get(protocol, protocol.capitalize())
@@ -368,8 +363,11 @@ def job(start_from_timestamp=None):
                 seen_ids.add(incentive_id)
                 continue
 
-        # Send notification
+        # Retired or unknown gauges never trigger price lookups or notifications.
         try:
+            _, protocol = get_gauge_info(incentive.get("gauge", ""), gauge_map)
+            if protocol not in ACTIVE_PROTOCOLS:
+                continue
             if not send_incentive_notification(incentive, gauge_map, tvl_map):
                 logging.error(f"Delivery failed for incentive {incentive_id}")
                 continue

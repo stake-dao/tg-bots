@@ -533,23 +533,15 @@ async def get_campaigns_increased(
 
 
 def get_all_platforms():
+    """Platforms monitored for new campaigns and upgrades; retired markets keep their claim jobs."""
     ALL_PLATFORMS = [
-        ContractRegistry.PENDLE_VOTEMARKET_V2,
         ContractRegistry.CURVE_VOTEMARKET_V2,
-        ContractRegistry.BALANCER_VOTEMARKET_V2,
         ContractRegistry.FXN_VOTEMARKET_V2,
         ContractRegistry.YB_VOTEMARKET_V2,
     ]
 
     names = {}
     gauges_endpoint = {}
-
-    for chain_id in ContractRegistry.BALANCER_VOTEMARKET_V2:
-        contracts = ContractRegistry.BALANCER_VOTEMARKET_V2[chain_id]
-        if contracts is not None:
-            for contract in contracts:
-                names[to_checksum_address(contract)] = "Balancer"
-                gauges_endpoint[to_checksum_address(contract)] = "balancer"
 
     for chain_id in ContractRegistry.FXN_VOTEMARKET_V2:
         contracts = ContractRegistry.FXN_VOTEMARKET_V2[chain_id]
@@ -565,13 +557,6 @@ def get_all_platforms():
                 names[to_checksum_address(contract)] = "Curve"
                 gauges_endpoint[to_checksum_address(contract)] = "curve"
 
-    for chain_id in ContractRegistry.PENDLE_VOTEMARKET_V2:
-        contracts = ContractRegistry.PENDLE_VOTEMARKET_V2[chain_id]
-        if contracts is not None:
-            for contract in contracts:
-                names[to_checksum_address(contract)] = "Pendle"
-                gauges_endpoint[to_checksum_address(contract)] = "pendle"
-
     for chain_id in ContractRegistry.YB_VOTEMARKET_V2:
         contracts = ContractRegistry.YB_VOTEMARKET_V2[chain_id]
         if contracts is not None:
@@ -583,6 +568,7 @@ def get_all_platforms():
 
 
 async def job():
+    failures = []
     checkpoints = {}
 
     # Last blocks fetch per chain
@@ -625,31 +611,19 @@ async def job():
                 continue
 
             for platform_address in platform_addresses:
-                await get_campaigns_created(
-                    web3,
-                    chain_id,
-                    platform_address,
-                    block_min,
-                    block_max,
-                    names,
-                    gauges_endpoint,
-                )
+                try:
+                    await get_campaigns_created(web3, chain_id, platform_address, block_min,
+                                                block_max, names, gauges_endpoint)
+                    time.sleep(5)
+                    await get_campaigns_increased(web3, chain_id, platform_address, block_min,
+                                                  block_max, names, gauges_endpoint)
+                    time.sleep(5)
+                except Exception as error:
+                    failures.append(f"{chain_id}:{platform_address}: {error}")
+                    logging.exception("Votemarket platform failed; continuing other markets")
 
-                # Rate limit
-                time.sleep(5)
-
-                await get_campaigns_increased(
-                    web3,
-                    chain_id,
-                    platform_address,
-                    block_min,
-                    block_max,
-                    names,
-                    gauges_endpoint,
-                )
-
-                # Rate limit
-                time.sleep(5)
+    if failures:
+        raise RuntimeError("Votemarket processing failed: " + "; ".join(failures))
 
 
 async def main():
