@@ -123,14 +123,14 @@ def test_incentives_partial_delivery_and_restart(monkeypatch):
     monkeypatch.setattr(incentives.time, "sleep", lambda seconds: None)
     state = {
         incentives.REDIS_KEY_SEEN: "[]",
-        incentives.REDIS_KEY_GAUGES: "{}",
+        incentives.REDIS_KEY_GAUGES: json.dumps({"0xfixture": {"name": "Curve fixture", "protocol": "curve"}}),
         incentives.REDIS_KEY_TVL: "{}",
     }
     redis = MagicMock()
     redis.get.side_effect = state.get
     redis.set.side_effect = lambda key, value: state.update({key: value})
     monkeypatch.setattr(incentives, "get_redis_client", lambda: redis)
-    rows = [{"id": i, "rewardSymbol": symbol, "amount": str(10**18),
+    rows = [{"id": i, "gauge": "0xfixture", "rewardSymbol": symbol, "amount": str(10**18),
              "duration": 86400, "start": 1700000000, "end": 1700086400}
             for i, symbol in [(1, "FIRST"), (2, "SECOND")]]
     response = MagicMock(status_code=200)
@@ -287,8 +287,10 @@ def test_votemarket_multichain_recovers_logs_once_per_run(isolated_bot, monkeypa
     monkeypatch.setattr(votemarket, "W3Multicall", multicall)
     monkeypatch.setattr(votemarket.time, "sleep", lambda seconds: None)
     if rpc_fails:
-        with pytest.raises(ConnectionError):
+        with pytest.raises(RuntimeError, match="Votemarket processing failed.*fixture RPC unavailable"):
             asyncio.run(votemarket.main())
+        # One failed platform must not prevent attempts on the remaining chains.
+        assert sum(method == "eth_getLogs" for method, _ in rpc_calls) == 3
         assert state["payloads"] == []
         return
     asyncio.run(votemarket.main())
