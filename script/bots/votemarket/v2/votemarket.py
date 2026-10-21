@@ -96,34 +96,26 @@ def remove_p_prefix(native_token_address, symbol):
     return symbol
 
 
-async def get_gauge_info(w3, platform_address, gauges_endpoint, gauge_address):
+async def get_gauge_info(platform_address, gauges_endpoint, gauge_address):
     """Get gauge name and chain ID from gauge info"""
     protocol = gauges_endpoint[to_checksum_address(platform_address)]
     gauge_endpoint = f"{protocol}/gauges"
     gauge_name = ""
-    gauge_chain_id = None  # Default to None - no chain ID found
 
     if gauge_endpoint not in gauges_endpoint_data_cache:
         gauges_endpoint_data_cache[gauge_endpoint] = await asyncio.to_thread(fetch_gauges_data, protocol)
 
     gauges_data = gauges_endpoint_data_cache[gauge_endpoint]
 
-    # Check if there's a default chainId in the response
-    if isinstance(gauges_data, dict):
-        if "chainId" in gauges_data:
-            gauge_chain_id = gauges_data["chainId"]
-
-        # Look for the specific gauge
-        if "gauges" in gauges_data:
-            for gauge in gauges_data["gauges"]:
-                if gauge["gauge"].lower() == gauge_address.lower():
-                    gauge_name = gauge.get("name", "")
-                    # Check if individual gauge has chainId (priority order)
-                    if "chainId" in gauge:
-                        gauge_chain_id = gauge["chainId"]
-                    elif "gaugeChainId" in gauge:
-                        gauge_chain_id = gauge["gaugeChainId"]
-                    break
+    gauge_chain_id = gauges_data.get("chainId")
+    for gauge in gauges_data["gauges"]:
+        if gauge["gauge"].lower() == gauge_address.lower():
+            gauge_name = gauge.get("name", "")
+            if "chainId" in gauge:
+                gauge_chain_id = gauge["chainId"]
+            elif "gaugeChainId" in gauge:
+                gauge_chain_id = gauge["gaugeChainId"]
+            break
 
     return gauge_name, gauge_chain_id
 
@@ -227,7 +219,7 @@ async def get_campaigns_created(
 
         tx_link = f'<a href="{get_explorer_link(chain_id)}/tx/{Web3.to_hex(log["transactionHash"])}">🔗 Tx Hash</a>'
         gauge_name, gauge_chain_id = await get_gauge_info(
-            web3, platform_address, gauges_endpoint, gauge
+            platform_address, gauges_endpoint, gauge
         )
 
         platform_name = names[to_checksum_address(platform_address)]
@@ -492,7 +484,7 @@ async def get_campaigns_increased(
 
         gauge = campaign[1]
         gauge_name, gauge_chain_id = await get_gauge_info(
-            web3, platform_address, gauges_endpoint, gauge
+            platform_address, gauges_endpoint, gauge
         )
 
         platform_name = names[to_checksum_address(platform_address)]

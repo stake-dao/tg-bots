@@ -48,7 +48,7 @@ def test_campaign_bot_uses_shared_reader_and_preserves_chain_fallback(monkeypatc
     monkeypatch.setattr(api._session, "get", lambda url, **kw: calls.append(url) or reply(payload))
     monkeypatch.setattr(votemarket, "gauges_endpoint_data_cache", {})
     for _ in range(2):
-        assert asyncio.run(votemarket.get_gauge_info(None, PLATFORM, {PLATFORM: "curve"}, GAUGE)) == (
+        assert asyncio.run(votemarket.get_gauge_info(PLATFORM, {PLATFORM: "curve"}, GAUGE)) == (
             "Pool", 42161,
         )
     assert calls == [f"{api.DEFAULT_BASE_URL}/curve/gauges"]
