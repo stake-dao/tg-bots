@@ -9,6 +9,7 @@ from shared.communication.telegram import send_telegram_message
 from shared.constants import ContractRegistry, GlobalConstants
 from shared.external.explorer import CHAIN_NAMES, L2_CHAIN_IDS
 from shared.services.data_hub_service import fetch_gauge_tvls as _fetch_gauge_tvls
+from shared.services.stakedao_api import PROTOCOLS, fetch_gauges_data
 from shared.utils.formatters import format_amount
 from shared.utils.globals import get_redis_client, get_token_price, replace_double_quotes_with_single
 
@@ -20,8 +21,6 @@ REDIS_KEY_SEEN = "tg-bot:votemarket-incentives:seen_ids"
 REDIS_KEY_GAUGES = "tg-bot:votemarket-incentives:gauge_names"
 REDIS_KEY_TVL = "tg-bot:votemarket-incentives:gauge_tvls"
 INCENTIVES_URL = "https://raw.githubusercontent.com/stake-dao/merkl-toolkit/refs/heads/main/data/incentives.json"
-VOTEMARKET_API_BASE = "https://votemarket-api.contact-69d.workers.dev"
-PROTOCOLS = ["curve", "balancer", "fxn", "pendle", "yb"]
 ONE_YEAR_SECONDS = 31536000
 SECONDS_PER_DAY = 86400
 
@@ -65,20 +64,13 @@ def fetch_gauge_data() -> dict:
     gauge_map = {}
 
     for protocol in PROTOCOLS:
-        try:
-            url = f"{VOTEMARKET_API_BASE}/{protocol}/gauges"
-            response = requests.get(url, timeout=30)
-            if response.status_code == 200:
-                data = response.json()
-                gauges = data.get("gauges", [])
-                for g in gauges:
-                    addr = g.get("gauge", "").lower()
-                    name = g.get("name", "")
-                    if addr and name:
-                        gauge_map[addr] = {"name": name, "protocol": protocol}
-                logging.info(f"Loaded {len(gauges)} gauges from {protocol}")
-        except Exception as e:
-            logging.warning(f"Failed to fetch gauges for {protocol}: {e}")
+        gauges = fetch_gauges_data(protocol)["gauges"]
+        for gauge in gauges:
+            addr = gauge["gauge"].lower()
+            name = gauge.get("name", "")
+            if name:
+                gauge_map[addr] = {"name": name, "protocol": protocol}
+        logging.info("Loaded %d gauges from %s", len(gauges), protocol)
 
     return gauge_map
 

@@ -5,7 +5,7 @@ import time
 from shared.bot_runner import get_block_range
 from dotenv import load_dotenv
 from eth_utils import to_checksum_address
-from shared.services.stakedao_api import StakeDAOApiService
+from shared.services.stakedao_api import fetch_gauges_data
 from shared.services.web3_service import get_web3_service
 from shared.communication.telegram import send_telegram_message
 from shared.constants import (
@@ -104,9 +104,7 @@ async def get_gauge_info(w3, platform_address, gauges_endpoint, gauge_address):
     gauge_chain_id = None  # Default to None - no chain ID found
 
     if gauge_endpoint not in gauges_endpoint_data_cache:
-        gauges_endpoint_data_cache[gauge_endpoint] = await StakeDAOApiService(
-            w3
-        ).get_gauges_data(protocol)
+        gauges_endpoint_data_cache[gauge_endpoint] = await asyncio.to_thread(fetch_gauges_data, protocol)
 
     gauges_data = gauges_endpoint_data_cache[gauge_endpoint]
 
