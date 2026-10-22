@@ -54,7 +54,7 @@ def test_campaign_bot_uses_shared_reader_and_preserves_chain_fallback(monkeypatc
     assert calls == [f"{api.DEFAULT_BASE_URL}/curve/gauges"]
 
 
-def test_incentives_bot_reads_all_protocols_through_shared_reader(monkeypatch):
+def test_incentives_bot_reads_active_protocols_through_shared_reader(monkeypatch):
     calls = []
 
     def get(url, **kwargs):
@@ -64,9 +64,9 @@ def test_incentives_bot_reads_all_protocols_through_shared_reader(monkeypatch):
 
     monkeypatch.setattr(api._session, "get", get)
     assert incentives.fetch_gauge_data() == {
-        protocol: {"name": protocol, "protocol": protocol} for protocol in api.PROTOCOLS
+        protocol: {"name": protocol, "protocol": protocol} for protocol in incentives.ACTIVE_PROTOCOLS
     }
-    assert calls == [f"{api.DEFAULT_BASE_URL}/{protocol}/gauges" for protocol in api.PROTOCOLS]
+    assert calls == [f"{api.DEFAULT_BASE_URL}/{protocol}/gauges" for protocol in incentives.ACTIVE_PROTOCOLS]
 
 
 def test_failed_protocol_never_caches_a_partial_catalog(monkeypatch):

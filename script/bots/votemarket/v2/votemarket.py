@@ -524,22 +524,13 @@ async def get_campaigns_increased(
 
 def get_all_platforms():
     ALL_PLATFORMS = [
-        ContractRegistry.PENDLE_VOTEMARKET_V2,
         ContractRegistry.CURVE_VOTEMARKET_V2,
-        ContractRegistry.BALANCER_VOTEMARKET_V2,
         ContractRegistry.FXN_VOTEMARKET_V2,
         ContractRegistry.YB_VOTEMARKET_V2,
     ]
 
     names = {}
     gauges_endpoint = {}
-
-    for chain_id in ContractRegistry.BALANCER_VOTEMARKET_V2:
-        contracts = ContractRegistry.BALANCER_VOTEMARKET_V2[chain_id]
-        if contracts is not None:
-            for contract in contracts:
-                names[to_checksum_address(contract)] = "Balancer"
-                gauges_endpoint[to_checksum_address(contract)] = "balancer"
 
     for chain_id in ContractRegistry.FXN_VOTEMARKET_V2:
         contracts = ContractRegistry.FXN_VOTEMARKET_V2[chain_id]
@@ -554,13 +545,6 @@ def get_all_platforms():
             for contract in contracts:
                 names[to_checksum_address(contract)] = "Curve"
                 gauges_endpoint[to_checksum_address(contract)] = "curve"
-
-    for chain_id in ContractRegistry.PENDLE_VOTEMARKET_V2:
-        contracts = ContractRegistry.PENDLE_VOTEMARKET_V2[chain_id]
-        if contracts is not None:
-            for contract in contracts:
-                names[to_checksum_address(contract)] = "Pendle"
-                gauges_endpoint[to_checksum_address(contract)] = "pendle"
 
     for chain_id in ContractRegistry.YB_VOTEMARKET_V2:
         contracts = ContractRegistry.YB_VOTEMARKET_V2[chain_id]

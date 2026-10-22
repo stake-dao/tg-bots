@@ -6,7 +6,6 @@ from urllib3.util import Retry
 
 DEFAULT_BASE_URL = "https://hub.stakedao.org/v1/votemarket"
 REQUEST_TIMEOUT = 30
-PROTOCOLS = ["curve", "balancer", "fxn", "pendle", "yb"]
 
 _session = requests.Session()
 _session.mount(
