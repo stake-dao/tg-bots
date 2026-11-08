@@ -114,25 +114,34 @@ def test_main_aborts_before_delivery_on_unavailable_inputs(isolated_bot, monkeyp
     assert state["payloads"] == []
 
 
-def test_incentives_partial_delivery_and_restart(monkeypatch):
+@pytest.mark.parametrize("catalog_failure", [None, "http", "json", "malformed", "empty"])
+def test_incentives_partial_delivery_and_restart(monkeypatch, catalog_failure):
     import json
     from bots.votemarket_incentives import main as incentives
+    from shared.services import stakedao_api as api
 
     monkeypatch.setenv("PROD", "True")
     monkeypatch.setattr(GlobalConstants, "BOT_VOTEMARKET_API_KEY", "fixture-bot")
     monkeypatch.setattr(incentives.time, "sleep", lambda seconds: None)
+    old_key = "tg-bot:votemarket-incentives:gauge_names"
+    protocols = ["curve", "fxn", "yb", "balancer", "pendle", "unknown", "seen"]
+    gauges = {protocol: f"0x{i:040x}" for i, protocol in enumerate(protocols, 1)}
+    old_catalog = {address: {"name": protocol, "protocol": "curve"}
+                   for protocol, address in gauges.items()}
     state = {
-        incentives.REDIS_KEY_SEEN: "[]",
-        incentives.REDIS_KEY_GAUGES: "{}",
+        "tg-bot:votemarket-incentives:seen_ids": "[7]",
+        old_key: json.dumps(old_catalog),
         incentives.REDIS_KEY_TVL: "{}",
     }
     redis = MagicMock()
     redis.get.side_effect = state.get
     redis.set.side_effect = lambda key, value: state.update({key: value})
+    redis.setex.side_effect = lambda key, ttl, value: state.update({key: value})
     monkeypatch.setattr(incentives, "get_redis_client", lambda: redis)
-    rows = [{"id": i, "rewardSymbol": symbol, "amount": str(10**18),
+    rows = [{"id": i, "gauge": gauges[protocol], "reward": protocol,
+             "rewardSymbol": protocol, "amount": str(10**18),
              "duration": 86400, "start": 1700000000, "end": 1700086400}
-            for i, symbol in [(1, "FIRST"), (2, "SECOND")]]
+            for i, protocol in enumerate(protocols, 1)]
     response = MagicMock(status_code=200)
     response.json.return_value = rows
 
@@ -140,29 +149,86 @@ def test_incentives_partial_delivery_and_restart(monkeypatch):
         assert url == incentives.INCENTIVES_URL
         return response
 
+    catalog_reads = []
+    discover_unknown = False
+
+    def send(session, request, **kwargs):
+        protocol = request.url.split("/")[-2]
+        assert request.url == f"{api.DEFAULT_BASE_URL}/{protocol}/gauges"
+        assert protocol in ("curve", "fxn", "yb")
+        catalog_reads.append(protocol)
+        catalog = [{"gauge": gauges[protocol]}]
+        if protocol != "yb":
+            catalog[0]["name"] = protocol
+        if protocol == "curve" and discover_unknown:
+            catalog.append({"gauge": gauges["unknown"], "name": "New pool"})
+        reply = requests.Response()
+        reply.status_code = 200
+        reply._content = json.dumps({"gauges": catalog}).encode()
+        if protocol == "fxn" and catalog_failure:
+            if catalog_failure == "http":
+                reply.status_code = 503
+            elif catalog_failure == "json":
+                reply._content = b"invalid JSON"
+            elif catalog_failure == "malformed":
+                reply._content = b'{"gauges": [{}]}'
+            else:
+                reply._content = b'{"gauges": []}'
+        return reply
+
     attempts = []
+    prices = []
     fail_second = True
+
+    def price(**kwargs):
+        prices.append(kwargs["token"])
+        return 1, 1
 
     def post(url, **kwargs):
         assert url == "https://api.telegram.org/botfixture-bot/sendMessage"
         payload = kwargs["json"]
         assert payload["chat_id"] == "@votemarket"
-        symbol = "FIRST" if "FIRST" in payload["text"] else "SECOND"
-        attempts.append(symbol)
+        protocol = next(p for p in protocols if f" {p} (~" in payload["text"])
+        if protocol == "yb":
+            assert gauges["yb"][:10] + "..." + gauges["yb"][-6:] in payload["text"]
+        attempts.append(protocol)
         reply = requests.Response()
-        reply.status_code = 503 if fail_second and symbol == "SECOND" else 200
+        reply.status_code = 503 if fail_second and protocol == "fxn" else 200
         reply._content = b"{}"
         return reply
 
     monkeypatch.setattr(requests, "get", get)
+    monkeypatch.setattr(requests.sessions.Session, "send", send)
     monkeypatch.setattr(requests, "post", post)
+    monkeypatch.setattr(incentives, "get_token_price", price)
+    if catalog_failure:
+        with pytest.raises((requests.HTTPError, ValueError)):
+            incentives.main()
+        assert attempts == prices == []
+        assert state[incentives.REDIS_KEY_SEEN] == "[7]"
+        redis.setex.assert_not_called()
+        catalog_failure = None
+        catalog_reads.clear()
     incentives.main()
-    assert set(json.loads(state[incentives.REDIS_KEY_SEEN])) == {1}
+    assert set(json.loads(state[incentives.REDIS_KEY_SEEN])) == {1, 3, 7}
+    assert catalog_reads == ["curve", "fxn", "yb"]
+    assert state[old_key] == json.dumps(old_catalog)
+    cached = json.loads(state[incentives.REDIS_KEY_GAUGES])
+    assert set(cached) == {gauges[p] for p in ("curve", "fxn", "yb")}
+    for protocol in ("balancer", "pendle"):
+        cached[gauges[protocol]] = {"name": protocol, "protocol": protocol}
+    state[incentives.REDIS_KEY_GAUGES] = json.dumps(cached)
     fail_second = False
     incentives.main()
-    assert set(json.loads(state[incentives.REDIS_KEY_SEEN])) == {1, 2}
+    assert set(json.loads(state[incentives.REDIS_KEY_SEEN])) == {1, 2, 3, 7}
     incentives.main()
-    assert attempts == ["FIRST", "SECOND", "SECOND"]
+    assert attempts == prices == ["curve", "fxn", "yb", "fxn"]
+    assert catalog_reads == ["curve", "fxn", "yb"]
+    del state[incentives.REDIS_KEY_GAUGES]
+    discover_unknown = True
+    incentives.main()
+    assert set(json.loads(state[incentives.REDIS_KEY_SEEN])) == {1, 2, 3, 6, 7}
+    assert attempts == prices == ["curve", "fxn", "yb", "fxn", "unknown"]
 
 
 @pytest.mark.parametrize("handler", ["manageTokenEchange", "manageAddLiquidity", "manageRemoveLiquidity", "manageRemoveLiquidityOneCoin"])
@@ -301,6 +367,53 @@ def test_votemarket_multichain_recovers_logs_once_per_run(isolated_bot, monkeypa
     asyncio.run(votemarket.main())
     assert sum(url.endswith("/logs") for url in state["reads"]) == 1
 
+
+
+@pytest.mark.parametrize("rpc_fails", [False, True])
+def test_votemarket_scans_only_active_platforms(isolated_bot, monkeypatch, rpc_fails):
+    import asyncio
+    from web3 import Web3
+    from web3.providers import BaseProvider
+    from bots.votemarket.v2 import votemarket
+    from shared.constants import ContractRegistry
+
+    state, _ = isolated_bot
+    state["extra_checkpoint"] = "".join(f"\nChain {chain} / last block 500" for chain in (10, 42161, 8453))
+    addresses = []
+
+    class Provider(BaseProvider):
+        def make_request(self, method, params):
+            if method == "eth_getLogs":
+                addresses.extend(address.lower() for address in params[0]["address"])
+                if rpc_fails:
+                    raise ConnectionError("fixture RPC unavailable")
+            result = {"eth_getBlockByNumber": {"number": "0x3e8"}, "eth_chainId": "0xa", "eth_getLogs": []}[method]
+            return {"jsonrpc": "2.0", "id": 1, "result": result}
+
+    w3 = Web3(Provider())
+    service = MagicMock()
+    service.w3 = {chain: w3 for chain in (10, 42161, 8453)}
+    service.get_w3.return_value = w3
+    monkeypatch.setattr(votemarket, "web3_service", service)
+    multicall = MagicMock()
+    multicall.return_value.call.return_value = []
+    monkeypatch.setattr(votemarket, "W3Multicall", multicall)
+    monkeypatch.setattr(votemarket.time, "sleep", lambda seconds: None)
+    if rpc_fails:
+        with pytest.raises(ConnectionError, match="fixture RPC unavailable"):
+            asyncio.run(votemarket.main())
+        assert len(addresses) == 1
+        multicall.assert_not_called()
+    else:
+        asyncio.run(votemarket.main())
+        expected = {address.lower() for platforms in (
+            ContractRegistry.CURVE_VOTEMARKET_V2,
+            ContractRegistry.FXN_VOTEMARKET_V2,
+            ContractRegistry.YB_VOTEMARKET_V2,
+        ) for address in platforms[42161]}
+        assert set(addresses) == expected
+        assert len(addresses) == len(expected) * 3 * 2
+    assert state["payloads"] == []
 
 
 def test_lockers_native_event_scans(isolated_bot, monkeypatch, caplog):

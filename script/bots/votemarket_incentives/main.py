@@ -9,6 +9,7 @@ from shared.communication.telegram import send_telegram_message
 from shared.constants import ContractRegistry, GlobalConstants
 from shared.external.explorer import CHAIN_NAMES, L2_CHAIN_IDS
 from shared.services.data_hub_service import fetch_gauge_tvls as _fetch_gauge_tvls
+from shared.services.stakedao_api import fetch_gauges_data
 from shared.utils.formatters import format_amount
 from shared.utils.globals import get_redis_client, get_token_price, replace_double_quotes_with_single
 
@@ -17,11 +18,10 @@ logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
 
 # Configuration
 REDIS_KEY_SEEN = "tg-bot:votemarket-incentives:seen_ids"
-REDIS_KEY_GAUGES = "tg-bot:votemarket-incentives:gauge_names"
+REDIS_KEY_GAUGES = "tg-bot:votemarket-incentives:gauge_names:hub-v1-active"
 REDIS_KEY_TVL = "tg-bot:votemarket-incentives:gauge_tvls"
 INCENTIVES_URL = "https://raw.githubusercontent.com/stake-dao/merkl-toolkit/refs/heads/main/data/incentives.json"
-VOTEMARKET_API_BASE = "https://votemarket-api.contact-69d.workers.dev"
-PROTOCOLS = ["curve", "balancer", "fxn", "pendle", "yb"]
+ACTIVE_PROTOCOLS = ("curve", "fxn", "yb")
 ONE_YEAR_SECONDS = 31536000
 SECONDS_PER_DAY = 86400
 
@@ -64,21 +64,14 @@ def fetch_gauge_data() -> dict:
     """
     gauge_map = {}
 
-    for protocol in PROTOCOLS:
-        try:
-            url = f"{VOTEMARKET_API_BASE}/{protocol}/gauges"
-            response = requests.get(url, timeout=30)
-            if response.status_code == 200:
-                data = response.json()
-                gauges = data.get("gauges", [])
-                for g in gauges:
-                    addr = g.get("gauge", "").lower()
-                    name = g.get("name", "")
-                    if addr and name:
-                        gauge_map[addr] = {"name": name, "protocol": protocol}
-                logging.info(f"Loaded {len(gauges)} gauges from {protocol}")
-        except Exception as e:
-            logging.warning(f"Failed to fetch gauges for {protocol}: {e}")
+    for protocol in ACTIVE_PROTOCOLS:
+        gauges = fetch_gauges_data(protocol)["gauges"]
+        if not gauges:
+            raise ValueError(f"Empty active gauge catalog: {protocol}")
+        for gauge in gauges:
+            addr = gauge["gauge"].lower()
+            gauge_map[addr] = {"name": gauge.get("name") or "", "protocol": protocol}
+        logging.info("Loaded %d gauges from %s", len(gauges), protocol)
 
     return gauge_map
 
@@ -108,25 +101,16 @@ def load_gauge_data() -> dict:
 
 
 def get_gauge_info(gauge_address: str, gauge_map: dict) -> tuple[str, str]:
-    """Get gauge name and protocol from map.
-
-    Returns (name, protocol) tuple. Falls back to abbreviated address and 'curve'.
-    """
     data = gauge_map.get(gauge_address.lower())
-    if data and isinstance(data, dict):
-        return data.get("name", ""), data.get("protocol", "curve")
-    # Handle legacy format (just name string)
-    if data and isinstance(data, str):
-        return data, "curve"
-    return "", "curve"
+    if not isinstance(data, dict) or data.get("protocol") not in ACTIVE_PROTOCOLS:
+        raise ValueError(f"Unknown or inactive gauge identity: {gauge_address}; notification deferred")
+    return data.get("name", ""), data["protocol"]
 
 
 # Protocol display names for links
 PROTOCOL_LABELS = {
     "curve": "Curve",
-    "balancer": "Balancer",
     "fxn": "F(x)",
-    "pendle": "Pendle",
     "yb": "YieldBasis",
 }
 
@@ -233,11 +217,13 @@ def format_tvl(tvl: float) -> str:
 
 def send_incentive_notification(incentive, gauge_map: dict, tvl_map: dict):
     """Send Telegram notification for a new incentive"""
+    gauge = incentive.get("gauge", "")
+    gauge_name, protocol = get_gauge_info(gauge, gauge_map)
+
     chain_id = int(incentive.get("fromChainId", 1))
     # Always use etherscan for links since rewards are distributed on mainnet
     explorer = "https://etherscan.io"
 
-    gauge = incentive.get("gauge", "")
     vault = incentive.get("vault", "")
     reward_token = incentive.get("reward", "")
     reward_symbol = incentive.get("rewardSymbol", "TOKEN")
@@ -275,8 +261,6 @@ def send_incentive_notification(incentive, gauge_map: dict, tvl_map: dict):
     # Determine source type and chain label
     source_label, source_emoji, chain_name = get_source_type(chain_id, sender)
 
-    # Get gauge name and protocol
-    gauge_name, protocol = get_gauge_info(gauge, gauge_map)
     if not gauge_name:
         gauge_name = gauge[:10] + "..." + gauge[-6:]  # Abbreviated address
     protocol_label = PROTOCOL_LABELS.get(protocol, protocol.capitalize())
