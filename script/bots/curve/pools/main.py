@@ -21,7 +21,7 @@ from shared.external.explorer import get_explorer_link
 from shared.protocols.lockers import load_lockers
 from shared.strings import abbreviate_number
 from shared.utils.event_logs import fetch_event_logs
-from shared.utils.globals import load_json
+from shared.utils.globals import get_token_price, load_json
 from web3 import Web3
 from shared.services.web3_service import get_web3_service
 
@@ -35,6 +35,11 @@ COWSWAP_TRADE_TOPIC = "0xa07a543ab8a018198e99ca0184c93fe9050a79400a0a723441f84de
 
 # Github config
 WORKFLOW_NAME = "curve-pools"
+
+# Ignore routine sdToken activity while keeping trades with material value.
+# The former pool-specific token amounts (25,000 sdSPECTRA, 1,000 sdCAKE, and
+# 250 sdFXS) each approximated this level at the time they were introduced.
+MIN_SD_TOKEN_TRADE_USD = 1_000
 
 # ABIs
 erc20ABI = load_json("abi/erc20")
@@ -248,22 +253,32 @@ def getMsgUser(w3, event, explorerLink):
         return ""
 
 
-def notSendSwapNotif(sell, poolAddress):
-    if sell < 25000 and poolAddress.lower() == ContractRegistry.SD_SPECTRA_POOL[8453].lower():
-        return True
-    if sell < 1000 and (
-        poolAddress.lower() == ContractRegistry.sdCAKE_CAKE_V3[56].lower()
-        or poolAddress.lower() == ContractRegistry.sdCAKE_CAKE_STABLE[56].lower()
-    ):
-        return True
-    if sell < 250 and poolAddress.lower() == ContractRegistry.sdFXS_CURVE_POOL[252].lower():
-        return True
-    return False
+def notSendSwapNotif(chain_id, token_address, token_amount):
+    """Return whether an sdToken notification is below the USD trade threshold.
 
+    Price lookup failures deliberately fail open: suppressing a material alert is
+    worse than allowing a one-off small alert while a price provider is down.
+    """
+    try:
+        _, value_usd = get_token_price(
+            chain_id, token_address, unformatted_amount=abs(token_amount)
+        )
+    except Exception as exc:
+        logging.warning("Could not price sdToken activity: %s", exc)
+        return False
 
-def notSendMintNotif(sell, depositor):
-    if sell < 1000 and (depositor.lower() == ContractRegistry.CAKE_DEPOSITOR[56].lower()):
+    if value_usd <= 0:
+        logging.warning("No USD price for sdToken activity; sending alert")
+        return False
+
+    if value_usd < MIN_SD_TOKEN_TRADE_USD:
+        logging.info(
+            "Skipping sdToken activity worth $%.2f (below $%s threshold)",
+            value_usd,
+            f"{MIN_SD_TOKEN_TRADE_USD:,}",
+        )
         return True
+
     return False
 
 
@@ -289,8 +304,7 @@ def manageSwapStable(w3, poolAddress, event, chainId):
         tokenSoldDecimals = tokenSoldContract.functions.decimals().call()
         sell = tokens_sold_amount / 10**tokenSoldDecimals
 
-        # Min sell 400
-        if notSendSwapNotif(sell, poolAddress):
+        if notSendSwapNotif(chainId, tokenSoldAddress, tokens_sold_amount):
             return
 
         tokenBoughtAddress = poolContract.functions.coins(bought_id).call()
@@ -387,7 +401,7 @@ def manageAddLiquidityStable(w3, poolAddress, event, chainId):
 
             token_amount = token_amounts[i]
             coinDeposited = token_amount / (10**tokenDecimals)
-            if notSendSwapNotif(coinDeposited, poolAddress):
+            if notSendSwapNotif(chainId, token, token_amount):
                 return
 
             formatted_coinDeposited = abbreviate_number(coinDeposited)
@@ -473,13 +487,17 @@ def manageSwapV3(w3, poolAddress, event, chainId):
             bought = amount0 / 10**token0Decimals
             soldTokenSymbol = token1Symbol
             boughtTokenSymbol = token0Symbol
+            soldTokenAddress = token1Address
+            soldTokenAmount = amount1
         else:
             bought = amount1 / 10**token1Decimals
             sell = amount0 / 10**token0Decimals
             boughtTokenSymbol = token1Symbol
             soldTokenSymbol = token0Symbol
+            soldTokenAddress = token0Address
+            soldTokenAmount = amount0
 
-        if notSendSwapNotif(sell, poolAddress):
+        if notSendSwapNotif(chainId, soldTokenAddress, soldTokenAmount):
             return
 
         # Get abs because we have negative value in event
@@ -551,9 +569,9 @@ def manageTokenEchange(
         decimalsSold = int(pool["coins"][sold_id]["decimals"])
         decimalsBought = int(pool["coins"][bought_id]["decimals"])
 
-        # Min sell for sdfxs on fraxtal
-        sell = tokens_bought / 10**decimalsBought
-        if notSendSwapNotif(sell, poolAddress):
+        sell = tokens_sold / 10**decimalsSold
+        tokenSoldAddress = pool["coins"][sold_id]["address"]
+        if notSendSwapNotif(chainId, tokenSoldAddress, tokens_sold):
             return
 
         poolName = getPoolName(pool)
@@ -575,7 +593,9 @@ def manageTokenEchange(
         formatted_tokens_sold = abbreviate_number(
             tokens_sold / 10**decimalsSold
         )
-        formatted_tokens_bought = abbreviate_number(sell)
+        formatted_tokens_bought = abbreviate_number(
+            tokens_bought / 10**decimalsBought
+        )
         msg += f"{formatted_tokens_sold} {symbolSold} for {formatted_tokens_bought} {symbolBought}\n\n"
 
         msg += getPoolBalancesMsg(w3, poolAddress, pool, blockNumber)
@@ -637,8 +657,7 @@ def manageLiquidity(
 
             coinDeposited = token_amount / 10 ** int(coin["decimals"])
 
-            # Min sell for sdfxs on fraxtal
-            if notSendSwapNotif(coinDeposited, poolAddress):
+            if notSendSwapNotif(chainId, coin["address"], token_amount):
                 return
 
             formatted_coinDeposited = abbreviate_number(coinDeposited)
@@ -670,6 +689,7 @@ def manageRemoveLiquidityOneCoin(
 
         decimals = 18
         coinSymbol = ""
+        coinAddress = ""
         if "token_id" in args:
             # It's a curveStableSwap-NG
             # Query the pool contract directly to avoid API coin ordering mismatch
@@ -697,6 +717,7 @@ def manageRemoveLiquidityOneCoin(
                     Web3.to_checksum_address(poolAddress)
                 ).call(block_identifier=blockNumber)
                 if coinBalanceAfterWithdraw < coinBalanceBeforeWithdraw:
+                    coinAddress = coin["address"]
                     decimals = coin["decimals"]
                     coinSymbol = coin["symbol"]
                     break
@@ -706,7 +727,7 @@ def manageRemoveLiquidityOneCoin(
             coin_amount_received
         )
 
-        if notSendSwapNotif(coin_amount_received, poolAddress):
+        if notSendSwapNotif(chainId, coinAddress, args["coin_amount"]):
             return
 
         poolName = getPoolName(pool)
@@ -804,8 +825,7 @@ def manageDeposit(w3, event, chainId, lockersApi):
 
         coin_amount_locked = amount / 10**tokenDecimals
 
-        # Check if we can send the Telegram notification
-        if notSendMintNotif(coin_amount_locked, depositor):
+        if notSendSwapNotif(chainId, token["address"], amount):
             return
 
         formatted_coin_amount_received = abbreviate_number(coin_amount_locked)
@@ -920,8 +940,7 @@ def manageDepositWithTransfer(w3, event, chainId, lockersApi):
 
         coin_amount_locked = amount / 10**tokenDecimals
 
-        # Check if we can send the Telegram notification
-        if notSendMintNotif(coin_amount_locked, depositor):
+        if notSendSwapNotif(chainId, token, amount):
             return
 
         formatted_coin_amount_received = abbreviate_number(coin_amount_locked)

@@ -381,6 +381,37 @@ def test_scan_order_and_caps(curve_pools):
     assert curve_pools.DEFAULT_MAX_BLOCKS_PER_RUN == 50000
 
 
+def test_sd_token_notifications_require_a_minimum_usd_value(curve_pools, monkeypatch):
+    calls = []
+
+    def price(chain_id, token, unformatted_amount):
+        calls.append((chain_id, token, unformatted_amount))
+        return "999.99", 999.99
+
+    monkeypatch.setattr(curve_pools, "get_token_price", price)
+
+    assert curve_pools.notSendSwapNotif(1, "0xtoken", 10**18)
+    assert calls == [(1, "0xtoken", 10**18)]
+
+    monkeypatch.setattr(
+        curve_pools, "get_token_price", lambda *_args, **_kwargs: ("1000.00", 1_000)
+    )
+    assert not curve_pools.notSendSwapNotif(1, "0xtoken", 10**18)
+
+
+def test_sd_token_notifications_fail_open_without_a_price(curve_pools, monkeypatch):
+    monkeypatch.setattr(
+        curve_pools, "get_token_price", lambda *_args, **_kwargs: ("0.00", 0)
+    )
+    assert not curve_pools.notSendSwapNotif(1, "0xtoken", 10**18)
+
+    def unavailable(*_args, **_kwargs):
+        raise ConnectionError("price API unavailable")
+
+    monkeypatch.setattr(curve_pools, "get_token_price", unavailable)
+    assert not curve_pools.notSendSwapNotif(1, "0xtoken", 10**18)
+
+
 def test_job_isolates_chain_failures_and_commits_after_processing(curve_pools, real_checkpoints, monkeypatch, caplog):
     processed = []
 
