@@ -174,6 +174,9 @@ def test_pool_api_and_compact_fallback_deliver_identical_messages(monkeypatch, h
 
     root = Path(pools.__file__).parents[4]
     monkeypatch.chdir(root)
+    monkeypatch.setattr(
+        pools, "get_token_price", lambda *_args, **_kwargs: ("100,000.00", 100_000)
+    )
     compact = json.loads((root / "json/bots/allPools.json").read_text())
     pool = next(p for p in compact if p.get("blockchainId") == "ethereum" and len(p["coins"]) >= 2)
     full = copy.deepcopy(pool)
