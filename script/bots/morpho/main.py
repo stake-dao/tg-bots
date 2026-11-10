@@ -1,8 +1,8 @@
 """
-Morpho Stake DAO USDC Vault Activity Bot.
+Morpho Stake DAO Vault Activity Bot.
 
 Monitors:
-1. Vault events: Deposit/Withdraw on Stake DAO USDC vaults (v1 and v2)
+1. Vault events: Deposit/Withdraw/Reallocation on configured Morpho V2 vaults
 2. Market events: Borrow/Repay/Collateral/Liquidation on Morpho Blue markets
 
 Sends Telegram notifications for all activity.
@@ -101,6 +101,14 @@ VAULTS = [
         name="Stake DAO frxUSD",
         symbol="Stake DAO frxUSD",
         morpho_url="https://app.morpho.org/ethereum/vault/0xCE13e39534082FCF8f13F6D84e6D95414D14271e/stake-dao-frxusd-v2",
+        asset_symbol="frxUSD",
+        asset_decimals=18,
+    ),
+    VaultConfig(
+        address=ContractRegistry.MORPHO_FRAX_ECOSYSTEM_ACCELERATOR[1],
+        name="Frax Ecosystem Accelerator",
+        symbol="FRAXELERATOR",
+        morpho_url="https://app.morpho.org/ethereum/vault/0x038d362028f89bcea7F598afb8d6Ff44b0a16708",
         asset_symbol="frxUSD",
         asset_decimals=18,
     ),
@@ -232,7 +240,7 @@ def format_apr_line(
 
 
 def format_vault_header(vault: VaultConfig) -> str:
-    return format_activity_header(vault.asset_symbol, "Ethereum", "🦋")
+    return format_activity_header(vault.name, "Ethereum", "🦋")
 
 
 def format_market_header(market: MarketMetadata) -> str:
