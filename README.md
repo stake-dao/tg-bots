@@ -20,6 +20,31 @@ Entrypoints are relative to `script/bots/`. All schedules use UTC.
 
 Cron variables follow the workflow name in uppercase with hyphens replaced by underscores, such as `BOT_CRON_CURVE_POOLS` and `BOT_CRON_VOTEMARKET_V2`.
 
+### Vote reminder — staged, not scheduled
+
+`script/bots/snapshot/delegation_reminder.py` is ported from `automation-jobs`
+at `d758de68fc23c21051f4dcbf1d53d103b197ec23`, with its on-chain regression tests
+and the two read-only Convex voting ABIs. It announces new Snapshot/Convex
+proposals and sends 24h/2h reminders for votes the delegate has not cast.
+It reuses this repository's Telegram delivery, Redis client and RPC failover.
+
+There is deliberately no workflow or schedule for this entrypoint here yet.
+`stake-dao/api/.github/workflows/vote_reminder.yml` remains the live caller.
+Do not run this copy alongside it: Snapshot reminders do not have delivery
+deduplication. A separately approved cutover must stop the old caller before
+starting the new one and preserve the existing Redis database 0 and keys:
+
+- `delegation_reminder_timestamp` (Snapshot watermark)
+- `delegation_reminder_onchain_timestamp` (Convex watermark)
+- `delegation_reminder_alerted_proposals` (announced proposal IDs)
+- `delegation_reminder_onchain_sent:*` (confirmed reminders and `:inflight` leases)
+
+The future caller needs `VOTE_REMINDER_BOT_API_KEY` for the existing
+`@StakedaoVoteReminder` channel, the existing `REDIS_HOST`, `REDIS_PORT` and
+`REDIS_PASSWORD`, plus the RPC configuration documented below. No private key
+or transaction-signing dependency is needed. This port does not provision
+credentials, move/reset Redis state or change production scheduling.
+
 ## Configuration
 
 Python 3.10.13; dependencies are pinned in `requirements.txt`. ABI and configuration files live under `json/`.

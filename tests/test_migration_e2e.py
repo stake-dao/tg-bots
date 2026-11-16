@@ -432,3 +432,163 @@ def test_native_rpc_log_limit_failover(monkeypatch, unavailable):
     assert all(query == queries[0] for query in queries)
     assert queries[0]["fromBlock"] == "0xa"
     assert queries[0]["toBlock"] == "0x14"
+
+
+@pytest.mark.parametrize("hours,failure,snapshot_voted", [
+    (24, None, False),
+    (2, None, True),
+    (2, "telegram", False),
+    (24, "rpc", False),
+])
+def test_vote_reminder_resumes_existing_state_and_retries(
+    monkeypatch, hours, failure, snapshot_voted,
+):
+    import json
+    from eth_abi import encode
+    from gql.transport.aiohttp import AIOHTTPTransport
+    from graphql import ExecutionResult, get_operation_ast
+    from web3 import Web3
+    from bots.snapshot import delegation_reminder as reminder
+    from shared.constants import ContractRegistry
+    from shared.utils import globals as shared_globals
+
+    now = 1_784_400_000
+    state = {"now": now, "failure": failure, "payloads": []}
+    snapshot_key = "delegation_reminder_timestamp"
+    onchain_key = "delegation_reminder_onchain_timestamp"
+    sent_key = f"delegation_reminder_onchain_sent:convex-curve-0:{hours}h"
+    values = {
+        snapshot_key: str(now - 60),
+        onchain_key: str(now - 120),
+        "delegation_reminder_alerted_proposals": {"snapshot-fixture", "convex-curve-0"},
+        "unrelated-bot-state": "keep",
+    }
+    expires = {}
+
+    def get(key):
+        if key in expires and expires[key] <= state["now"]:
+            values.pop(key, None)
+        return values.get(key)
+
+    def put(key, value, nx=False, ex=None):
+        if nx and get(key) is not None:
+            return False
+        values[key] = str(value)
+        if ex is not None:
+            expires[key] = state["now"] + ex
+        return True
+
+    def advance(_script, _count, key, timestamp):
+        if get(key) is None or int(get(key)) < timestamp:
+            put(key, timestamp)
+
+    redis_client = MagicMock()
+    redis_client.get.side_effect = get
+    redis_client.set.side_effect = put
+    redis_client.setnx.side_effect = lambda key, value: put(key, value, nx=True)
+    redis_client.sismember.side_effect = lambda key, value: value in values.get(key, set())
+    redis_client.sadd.side_effect = lambda key, value: values.setdefault(key, set()).add(value)
+    redis_client.eval.side_effect = advance
+    monkeypatch.setattr(shared_globals.redis, "Redis", lambda **kwargs: redis_client)
+    monkeypatch.setenv("REDIS_HOST", "fixture.invalid")
+    monkeypatch.setenv("REDIS_PORT", "6379")
+    monkeypatch.setenv("REDIS_PASSWORD", "fixture-password")
+    monkeypatch.setenv("PROD", "True")
+    monkeypatch.setattr(GlobalConstants, "VOTE_REMINDER_BOT_API_KEY", "fixture-reminder")
+    monkeypatch.setattr(reminder.time, "time", lambda: state["now"])
+    monkeypatch.setattr(reminder.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(reminder, "_ONCHAIN_RPC", reminder._EndpointRotation(
+        endpoints=["https://fixture.invalid/rpc"],
+    ))
+
+    proposal = {
+        "id": "snapshot-fixture", "title": "Snapshot fixture vote",
+        "start": now - 86400, "end": now + hours * 3600 - 30,
+        "space": {"id": "fixture.eth", "name": "Fixture"},
+    }
+
+    async def execute(_transport, document, variable_values=None, **kwargs):
+        operation = get_operation_ast(document).name.value
+        params = variable_values or {}
+        if operation == "CheckVote":
+            return ExecutionResult(data={"votes": [{"id": "voted"}] if snapshot_voted else []})
+        proposals = []
+        if (operation == "Proposals" and params["space"] == "fixture.eth"
+                and params["start_threshold"] <= proposal["end"] <= params["end"]):
+            proposals = [proposal]
+        return ExecutionResult(data={"proposals": proposals})
+
+    monkeypatch.setattr(AIOHTTPTransport, "execute", execute)
+    count_selector = Web3.keccak(text="proposalCount()").to_0x_hex()[:10]
+    proposals_selector = Web3.keccak(text="proposals(uint256)").to_0x_hex()[:10]
+    vote_selector = Web3.keccak(text="getVote(uint256,address)").to_0x_hex()[:10]
+
+    def send(_session, request, **kwargs):
+        status = 200
+        if request.url.endswith("/api/lockers/index.json"):
+            data = {"parsed": [{"delegation": ["fixture.eth"]}]}
+        elif request.url == "https://api.telegram.org/botfixture-reminder/sendMessage":
+            payload = json.loads(request.body)
+            assert payload["chat_id"] == "@StakedaoVoteReminder"
+            assert payload["parse_mode"] == "html"
+            is_onchain = "Convex Curve (on-chain)" in payload["text"]
+            status = 503 if is_onchain and state["failure"] == "telegram" else 200
+            state["payloads"].append((payload, status))
+            data = {"ok": status == 200}
+        else:
+            assert request.url == "https://fixture.invalid/rpc"
+            payload = json.loads(request.body)
+            method = payload["method"]
+            data = {"jsonrpc": "2.0", "id": payload["id"]}
+            if method == "eth_chainId":
+                data["result"] = "0x1"
+            elif method == "eth_getCode":
+                data["result"] = "0x60"
+            else:
+                assert method == "eth_call", "The reminder must never sign or send transactions"
+                call = payload["params"][0]
+                address = call["to"].lower()
+                selector = call["data"][:10]
+                if (state["failure"] == "rpc"
+                        and address == ContractRegistry.CONVEX_FX_GAUGE_VOTING[1].lower()):
+                    data["error"] = {"code": -32603, "message": "fixture RPC unavailable"}
+                elif selector == count_selector:
+                    count = int(address == ContractRegistry.CONVEX_CURVE_GAUGE_VOTING[1].lower())
+                    data["result"] = "0x" + encode(["uint256"], [count]).hex()
+                elif selector == proposals_selector:
+                    data["result"] = "0x" + encode(
+                        ["uint48", "uint48", "uint48"],
+                        [now - 86400, proposal["end"], 228],
+                    ).hex()
+                else:
+                    assert selector == vote_selector
+                    data["result"] = "0x" + encode(
+                        ["address[]", "uint256[]", "bool", "uint256", "int256"],
+                        [[], [], False, 0, 0],
+                    ).hex()
+        response = requests.Response()
+        response.status_code = status
+        response._content = json.dumps(data).encode()
+        response.url = request.url
+        return response
+
+    monkeypatch.setattr(requests.sessions.Session, "send", send)
+    reminder.main()
+    assert values[snapshot_key] == str(now)
+    assert values[onchain_key] == str(now - 120 if failure else now)
+    assert (get(sent_key) is not None) == (failure != "telegram")
+
+    state.update(now=now + 301, failure=None)
+    reminder.main()
+    assert values[snapshot_key] == values[onchain_key] == str(now + 301)
+    assert get(sent_key) == "1"
+    delivered = [payload["text"] for payload, status in state["payloads"] if status == 200]
+    assert sum("Snapshot fixture vote" in text for text in delivered) == int(not snapshot_voted)
+    assert sum("Convex Curve (on-chain)" in text for text in delivered) == 1
+    assert all(f"{hours}h reminder" in text for text in delivered)
+    assert any("safe=eth:0xbB06fEFB8f23A7c60C93fe20464DB6687C51955f" in text for text in delivered)
+    attempts = len(state["payloads"])
+    state["now"] += 301
+    reminder.main()
+    assert len(state["payloads"]) == attempts
+    assert values["unrelated-bot-state"] == "keep"

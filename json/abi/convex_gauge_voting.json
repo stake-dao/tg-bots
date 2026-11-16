@@ -1,0 +1,36 @@
+[
+  {
+    "name": "proposalCount",
+    "type": "function",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [{ "name": "", "type": "uint256" }]
+  },
+  {
+    "name": "proposals",
+    "type": "function",
+    "stateMutability": "view",
+    "inputs": [{ "name": "", "type": "uint256" }],
+    "outputs": [
+      { "name": "startTime", "type": "uint48" },
+      { "name": "endTime", "type": "uint48" },
+      { "name": "epoch", "type": "uint48" }
+    ]
+  },
+  {
+    "name": "getVote",
+    "type": "function",
+    "stateMutability": "view",
+    "inputs": [
+      { "name": "_proposalId", "type": "uint256" },
+      { "name": "_user", "type": "address" }
+    ],
+    "outputs": [
+      { "name": "gauges", "type": "address[]" },
+      { "name": "weights", "type": "uint256[]" },
+      { "name": "voted", "type": "bool" },
+      { "name": "baseWeight", "type": "uint256" },
+      { "name": "adjustedWeight", "type": "int256" }
+    ]
+  }
+]
