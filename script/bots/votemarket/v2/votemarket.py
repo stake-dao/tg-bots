@@ -15,6 +15,7 @@ from shared.constants import (
     GlobalConstants,
 )
 from shared.external.explorer import get_explorer_link
+from shared.utils.event_logs import fetch_event_logs
 from shared.utils.formatters import format_amount
 from shared.utils.globals import (
     getHistoricalTokenPrice,
@@ -28,8 +29,6 @@ load_dotenv()
 logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
 
 WORKFLOW_NAME = "votemarket-v2"
-# Arbitrum RPC rejects getLogs queries spanning more than 30,000 blocks.
-LOG_BLOCK_BATCH_SIZE = 30000
 
 KNOW_ADDRESSES = [
     # Curve
@@ -144,14 +143,9 @@ async def get_campaigns_created(
         abi=get_abi(platform_address),
     )
 
-    campaign_created_logs = []
-    for start in range(from_block, to_block + 1, LOG_BLOCK_BATCH_SIZE):
-        campaign_created_logs.extend(
-            platformContract.events.CampaignCreated().get_logs(
-                from_block=start,
-                to_block=min(start + LOG_BLOCK_BATCH_SIZE - 1, to_block),
-            )
-        )
+    campaign_created_logs = fetch_event_logs(
+        platformContract.events.CampaignCreated(), from_block, to_block, chain_id
+    )
 
     multicall = W3Multicall(web3)
 
@@ -373,14 +367,9 @@ async def get_campaigns_increased(
         abi=get_abi(platform_address),
     )
 
-    campaign_increased_logs = []
-    for start in range(from_block, to_block + 1, LOG_BLOCK_BATCH_SIZE):
-        campaign_increased_logs.extend(
-            platformContract.events.CampaignUpgradeQueued().get_logs(
-                from_block=start,
-                to_block=min(start + LOG_BLOCK_BATCH_SIZE - 1, to_block),
-            )
-        )
+    campaign_increased_logs = fetch_event_logs(
+        platformContract.events.CampaignUpgradeQueued(), from_block, to_block, chain_id
+    )
 
     multicall = W3Multicall(web3)
 
